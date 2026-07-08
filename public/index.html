@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MNB Omni Caller — by MNB Research</title>
+<link rel="stylesheet" href="styles.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- ===== Login gate (shown only when a dashboard password is configured) ===== -->
+<div id="loginGate" class="login-gate hidden">
+  <div class="login-card">
+    <div class="brand-mark">MNB</div>
+    <h1>MNB Omni Caller</h1>
+    <p class="muted">by MNB Research — sign in to continue</p>
+    <input type="password" id="loginPassword" placeholder="Password" />
+    <button class="btn primary" id="loginBtn">Sign in</button>
+    <p id="loginError" class="error hidden">Wrong password</p>
+  </div>
+</div>
+
+<div id="appShell" class="shell hidden">
+  <!-- ===== Sidebar ===== -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">MNB</div>
+      <div>
+        <div class="brand-name">MNB Omni Caller</div>
+        <div class="brand-sub">by MNB Research</div>
+      </div>
+    </div>
+    <nav>
+      <a href="#overview" class="nav-item active" data-view="overview"><span class="ico">◧</span> Overview</a>
+      <a href="#call" class="nav-item" data-view="call"><span class="ico">✆</span> Place a Call</a>
+      <a href="#studio" class="nav-item" data-view="studio"><span class="ico">✎</span> Agent Studio</a>
+      <a href="#logs" class="nav-item" data-view="logs"><span class="ico">≡</span> Call Logs</a>
+      <a href="#knowledge" class="nav-item" data-view="knowledge"><span class="ico">▤</span> Knowledge Base</a>
+      <a href="#campaigns" class="nav-item" data-view="campaigns"><span class="ico">⇶</span> Campaigns</a>
+      <a href="#numbers" class="nav-item" data-view="numbers"><span class="ico">☎</span> Phone Numbers</a>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="agent-picker">
+        <label>Active agent</label>
+        <select id="globalAgent"></select>
+        <button class="btn ghost small" style="width:100%;margin-top:8px" onclick="openAgentModal()">+ New agent</button>
+      </div>
+      <div class="foot-note">© MNB Research · Omni Caller</div>
+    </div>
+  </aside>
+
+  <!-- ===== Main ===== -->
+  <main class="main">
+
+    <!-- Overview -->
+    <section id="view-overview" class="view">
+      <header class="view-head">
+        <h2>Overview</h2>
+        <button class="btn ghost" onclick="loadOverview()">↻ Refresh</button>
+      </header>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-label">Total calls</div><div class="stat-value" id="statTotal">–</div></div>
+        <div class="stat-card"><div class="stat-label">Completed</div><div class="stat-value good" id="statCompleted">–</div></div>
+        <div class="stat-card"><div class="stat-label">Failed / no answer</div><div class="stat-value bad" id="statFailed">–</div></div>
+        <div class="stat-card"><div class="stat-label">Avg duration</div><div class="stat-value" id="statAvgDur">–</div></div>
+        <div class="stat-card"><div class="stat-label">Positive sentiment</div><div class="stat-value good" id="statSentiment">–</div></div>
+        <div class="stat-card"><div class="stat-label">Agents</div><div class="stat-value" id="statAgents">–</div></div>
+      </div>
+      <div class="chart-grid">
+        <div class="card"><h3>Calls per day</h3><canvas id="chartVolume"></canvas></div>
+        <div class="card"><h3>Call outcomes</h3><canvas id="chartStatus"></canvas></div>
+        <div class="card"><h3>Sentiment</h3><canvas id="chartSentiment"></canvas></div>
+        <div class="card"><h3>Channel</h3><canvas id="chartChannel"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Recent calls</h3>
+        <div id="recentCalls" class="table-wrap"></div>
+      </div>
+    </section>
+
+    <!-- Place a Call -->
+    <section id="view-call" class="view hidden">
+      <header class="view-head"><h2>Place a Call</h2></header>
+      <div class="two-col">
+        <div class="card">
+          <h3>Dispatch an outbound call</h3>
+          <label>Agent</label>
+          <select id="callAgent"></select>
+          <label>Phone number to call <span class="muted">(with country code, e.g. +91…)</span></label>
+          <input id="callNumber" type="tel" placeholder="+15551234567" />
+          <label>Call from <span class="muted">(optional)</span></label>
+          <select id="callFrom"><option value="">Platform default number</option></select>
+          <label>Call context <span class="muted">(optional — passed to the agent)</span></label>
+          <div id="contextRows"></div>
+          <button class="btn ghost small" onclick="addContextRow()">+ Add context field</button>
+          <div class="spacer"></div>
+          <button class="btn primary big" id="dispatchBtn" onclick="dispatchCall()">✆ Place call</button>
+          <div id="dispatchResult" class="result hidden"></div>
+        </div>
+        <div class="card">
+          <h3>Recent dispatches</h3>
+          <div id="dispatchHistory" class="dispatch-history"><p class="muted">Calls you place in this session appear here.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Agent Studio -->
+    <section id="view-studio" class="view hidden">
+      <header class="view-head">
+        <h2>Agent Studio</h2>
+        <div>
+          <button class="btn ghost" onclick="deleteAgent()" style="color:var(--bad)">Delete agent</button>
+          <button class="btn ghost" onclick="loadStudio()">↻ Reload</button>
+          <button class="btn primary" id="saveAgentBtn" onclick="saveAgent()">Save changes</button>
+        </div>
+      </header>
+      <div class="card">
+        <h3>Identity</h3>
+        <div class="two-col tight">
+          <div>
+            <label>Agent name</label>
+            <input id="agName" type="text" />
+          </div>
+          <div>
+            <label>Current voice / model</label>
+            <input id="agVoice" type="text" disabled />
+          </div>
+        </div>
+        <label>Welcome message <span class="muted">(first thing the agent says)</span></label>
+        <textarea id="agWelcome" rows="2"></textarea>
+      </div>
+      <div class="card">
+        <h3>Voice & model</h3>
+        <div class="two-col tight">
+          <div>
+            <label>Voice provider</label>
+            <select id="agVoiceProvider" onchange="loadVoiceOptions()">
+              <option value="">Keep current voice</option>
+              <option value="eleven_labs">ElevenLabs</option>
+              <option value="cartesia">Cartesia</option>
+              <option value="google">Google</option>
+              <option value="sarvam">Sarvam</option>
+            </select>
+          </div>
+          <div>
+            <label>Voice</label>
+            <select id="agVoiceId" disabled><option value="">Pick a provider first</option></select>
+          </div>
+        </div>
+        <div class="two-col tight">
+          <div>
+            <label>Language model</label>
+            <select id="agModel"><option value="">Keep current model</option></select>
+          </div>
+          <div>
+            <label>Speech speed <span class="muted">(0.5–2.0)</span></label>
+            <input id="agSpeed" type="number" min="0.5" max="2" step="0.1" placeholder="1.0" />
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="row-between">
+          <h3>Training — conversation instructions</h3>
+          <button class="btn ghost small" onclick="addSection()">+ Add section</button>
+        </div>
+        <p class="muted">Each section teaches the agent how to handle one part of the conversation. Edit, add, or remove sections, then Save.</p>
+        <div id="sections"></div>
+      </div>
+      <div id="studioStatus" class="result hidden"></div>
+    </section>
+
+    <!-- Call Logs -->
+    <section id="view-logs" class="view hidden">
+      <header class="view-head">
+        <h2>Call Logs</h2>
+        <div class="filters">
+          <select id="logStatus" onchange="loadLogs(1)">
+            <option value="">All outcomes</option>
+            <option value="completed">Completed</option>
+            <option value="busy">Busy</option>
+            <option value="failed">Failed</option>
+            <option value="no-answer">No answer</option>
+          </select>
+          <button class="btn ghost" onclick="loadLogs(1)">↻ Refresh</button>
+        </div>
+      </header>
+      <div class="card">
+        <div id="logsTable" class="table-wrap"></div>
+        <div class="pager">
+          <button class="btn ghost small" onclick="loadLogs(logsPage-1)">‹ Prev</button>
+          <span id="logsPageInfo"></span>
+          <button class="btn ghost small" onclick="loadLogs(logsPage+1)">Next ›</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Knowledge Base -->
+    <section id="view-knowledge" class="view hidden">
+      <header class="view-head">
+        <h2>Knowledge Base</h2>
+        <button class="btn ghost" onclick="loadKnowledge()">↻ Refresh</button>
+      </header>
+      <div class="two-col">
+        <div class="card">
+          <h3>Add a source</h3>
+          <p class="muted">Sources ground the agent's answers in your own material. Text and web pages are converted to PDF automatically.</p>
+          <label>Upload a file <span class="muted">(.pdf, .txt, .md)</span></label>
+          <input type="file" id="kbFile" accept=".pdf,.txt,.md,.markdown,text/plain,application/pdf" />
+          <button class="btn primary" onclick="uploadKb()">Upload file</button>
+          <div class="spacer"></div>
+          <label>Or import a web page</label>
+          <input id="kbUrl" type="url" placeholder="https://www.mnbresearch.com/services" />
+          <button class="btn primary" onclick="uploadKbUrl()">Import page</button>
+          <div class="spacer"></div>
+          <label>Or paste text directly</label>
+          <input id="kbTextTitle" type="text" placeholder="Title (e.g. Pricing 2026)" />
+          <textarea id="kbText" rows="4" placeholder="Paste any text the agent should know…"></textarea>
+          <button class="btn primary" onclick="uploadKbText()">Add text source</button>
+          <div id="kbUploadStatus" class="result hidden"></div>
+        </div>
+        <div class="card">
+          <h3>Attach to agent</h3>
+          <p class="muted">Select files below, then attach them to the active agent with an instruction on when to use them.</p>
+          <input id="kbWhen" type="text" placeholder="e.g. Use these documents for pricing questions" />
+          <button class="btn primary" onclick="attachKb()">Attach selected to agent</button>
+          <button class="btn ghost" onclick="detachKb()">Detach selected</button>
+          <div id="kbAttachStatus" class="result hidden"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Documents</h3>
+        <div id="kbTable" class="table-wrap"></div>
+      </div>
+    </section>
+
+    <!-- Campaigns -->
+    <section id="view-campaigns" class="view hidden">
+      <header class="view-head">
+        <h2>Bulk Call Campaigns</h2>
+        <button class="btn ghost" onclick="loadCampaigns()">↻ Refresh</button>
+      </header>
+      <div class="card">
+        <h3>New campaign</h3>
+        <p class="muted">Calls every contact in the list using the active agent. Requires a phone number on the account (see Phone Numbers tab).</p>
+        <div class="two-col tight">
+          <div>
+            <label>Campaign name</label>
+            <input id="cpName" type="text" placeholder="July follow-ups" />
+          </div>
+          <div>
+            <label>Call from</label>
+            <select id="cpFrom"><option value="">— no number available —</option></select>
+          </div>
+        </div>
+        <label>Contacts <span class="muted">(one per line: +number, optional name — e.g. +919876543210, Rahul)</span></label>
+        <textarea id="cpContacts" rows="5" placeholder="+919876543210, Rahul&#10;+918765432109, Priya"></textarea>
+        <button class="btn primary" onclick="createCampaign()">Launch campaign</button>
+        <div id="cpStatus" class="result hidden"></div>
+      </div>
+      <div class="card">
+        <h3>Campaigns</h3>
+        <div id="campaignsTable" class="table-wrap"></div>
+      </div>
+    </section>
+
+    <!-- Phone Numbers -->
+    <section id="view-numbers" class="view hidden">
+      <header class="view-head">
+        <h2>Phone Numbers</h2>
+        <button class="btn ghost" onclick="loadNumbersView()">↻ Refresh</button>
+      </header>
+      <div class="card">
+        <p class="muted">Numbers on the account can be attached to an agent so it answers inbound calls and dials out from that number. Single outbound calls work without one (a platform default number is used).</p>
+        <div id="numbersTable" class="table-wrap"></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ===== New agent modal ===== -->
+<div id="agentModal" class="drawer hidden">
+  <div class="drawer-panel" style="max-width:560px">
+    <div class="row-between">
+      <h3>Create a new agent</h3>
+      <button class="btn ghost small" onclick="closeAgentModal()">✕ Close</button>
+    </div>
+    <label>Agent name</label>
+    <input id="naName" type="text" placeholder="MNB Research Support Agent" />
+    <label>Welcome message</label>
+    <textarea id="naWelcome" rows="2" placeholder="Hi, this is the assistant from MNB Research. How can I help you today?"></textarea>
+    <label>Purpose / instructions <span class="muted">(what this agent does — you can refine sections later in Agent Studio)</span></label>
+    <textarea id="naPurpose" rows="5" placeholder="This agent qualifies inbound leads for MNB Research: it asks about their requirements, budget and timeline, and offers to book a call with the team."></textarea>
+    <div class="spacer"></div>
+    <button class="btn primary big" id="naCreateBtn" onclick="createAgent()">Create agent</button>
+    <div id="naStatus" class="result hidden"></div>
+  </div>
+</div>
+
+<!-- ===== Call detail drawer ===== -->
+<div id="drawer" class="drawer hidden">
+  <div class="drawer-panel">
+    <div class="row-between">
+      <h3 id="drawerTitle">Call detail</h3>
+      <button class="btn ghost small" onclick="closeDrawer()">✕ Close</button>
+    </div>
+    <div id="drawerBody"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
