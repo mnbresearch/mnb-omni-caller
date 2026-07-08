@@ -22,6 +22,20 @@ let agents = [];
 let numbers = [];
 let logsPage = 1;
 let charts = {};
+let lastChartLogs = null;
+
+/* ---------- Theme ---------- */
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  const btn = $('themeToggle');
+  if (btn) btn.textContent = theme === 'light' ? '◑ Dark mode' : '◐ Light mode';
+  localStorage.setItem('mnb_theme', theme);
+  if (lastChartLogs) drawCharts(lastChartLogs);
+}
+function toggleTheme() {
+  applyTheme((localStorage.getItem('mnb_theme') || 'dark') === 'dark' ? 'light' : 'dark');
+}
+applyTheme(localStorage.getItem('mnb_theme') || 'dark');
 
 /* ---------- Boot ---------- */
 (async function boot() {
@@ -213,9 +227,11 @@ function countBy(arr, fn) {
 }
 
 function drawCharts(logs) {
-  const palette = ['#4f7cff', '#3fb97f', '#e5645f', '#e0a83f', '#9b59f5', '#48c3d8'];
-  Chart.defaults.color = '#8b93a7';
-  Chart.defaults.borderColor = '#2a3245';
+  lastChartLogs = logs;
+  const light = (document.documentElement.dataset.theme === 'light');
+  const palette = ['#ff7a18', '#43b97f', '#e05d55', '#ffb347', '#8a8a8a', '#c96a1e'];
+  Chart.defaults.color = light ? '#7c786f' : '#97938c';
+  Chart.defaults.borderColor = light ? '#e0ddd6' : '#2b2b2f';
 
   const byDay = countBy(logs, (l) => (l.time_of_call || '').split(' ')[0]);
   const days = Object.keys(byDay).sort((a, b) => new Date(a) - new Date(b)).slice(-14);
