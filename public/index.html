@@ -9,15 +9,30 @@
 </head>
 <body>
 
-<!-- ===== Login gate (shown only when a dashboard password is configured) ===== -->
+<!-- ===== Login / request-access gate ===== -->
 <div id="loginGate" class="login-gate hidden">
   <div class="login-card">
     <div class="brand-mark">MNB</div>
     <h1>MNB Omni Caller</h1>
-    <p class="muted">by MNB Research — sign in to continue</p>
-    <input type="password" id="loginPassword" placeholder="Password" />
-    <button class="btn primary" id="loginBtn">Sign in</button>
-    <p id="loginError" class="error hidden">Wrong password</p>
+    <p class="muted">by MNB Research</p>
+
+    <div id="loginForm">
+      <input type="email" id="loginEmail" placeholder="Email" />
+      <input type="password" id="loginPassword" placeholder="Password" style="margin-top:10px" />
+      <button class="btn primary" id="loginBtn" style="width:100%;margin-top:14px" onclick="doLogin()">Sign in</button>
+      <p class="muted" style="margin-top:16px">New organization? <a href="#" onclick="showSignup();return false" style="color:var(--accent)">Request access</a></p>
+    </div>
+
+    <div id="signupForm" class="hidden">
+      <input type="text" id="suOrg" placeholder="Organization name" />
+      <input type="email" id="suEmail" placeholder="Work email" style="margin-top:10px" />
+      <input type="password" id="suPassword" placeholder="Choose a password (6+ chars)" style="margin-top:10px" />
+      <button class="btn primary" style="width:100%;margin-top:14px" onclick="doSignup()">Request access</button>
+      <p class="muted" style="margin-top:16px">Already approved? <a href="#" onclick="showLogin();return false" style="color:var(--accent)">Sign in</a></p>
+    </div>
+
+    <p id="loginError" class="error hidden"></p>
+    <p id="loginOk" class="good hidden"></p>
   </div>
 </div>
 
@@ -39,14 +54,24 @@
       <a href="#knowledge" class="nav-item" data-view="knowledge"><span class="ico">▤</span> Knowledge Base</a>
       <a href="#campaigns" class="nav-item" data-view="campaigns"><span class="ico">⇶</span> Campaigns</a>
       <a href="#numbers" class="nav-item" data-view="numbers"><span class="ico">☎</span> Phone Numbers</a>
+      <a href="#admin" class="nav-item hidden" id="navAdmin" data-view="admin"><span class="ico">⚙</span> Admin</a>
     </nav>
     <div class="sidebar-foot">
+      <div id="usageMeter" class="hidden" style="margin-bottom:10px">
+        <label style="font-size:0.75em;color:var(--muted);margin:0 0 4px">Minutes this month</label>
+        <div style="background:var(--panel-2);border-radius:6px;height:8px;overflow:hidden">
+          <div id="usageBar" style="height:100%;width:0%;background:var(--accent-grad)"></div>
+        </div>
+        <div id="usageText" class="muted" style="margin-top:3px;font-size:0.75em"></div>
+      </div>
       <button class="btn ghost small theme-toggle" id="themeToggle" onclick="toggleTheme()">◐ Light mode</button>
       <div class="agent-picker">
         <label>Active agent</label>
         <select id="globalAgent"></select>
-        <button class="btn ghost small" style="width:100%;margin-top:8px" onclick="openAgentModal()">+ New agent</button>
+        <button class="btn ghost small hidden" id="newAgentBtn" style="width:100%;margin-top:8px" onclick="openAgentModal()">+ New agent</button>
       </div>
+      <div id="whoami" class="muted" style="margin-top:10px;font-size:0.75em;text-align:center"></div>
+      <button class="btn ghost small" style="width:100%;margin-top:6px" onclick="doLogout()">Sign out</button>
       <div class="foot-note">© MNB Research · Omni Caller</div>
     </div>
   </aside>
@@ -262,6 +287,19 @@
       <div class="card">
         <h3>Campaigns</h3>
         <div id="campaignsTable" class="table-wrap"></div>
+      </div>
+    </section>
+
+    <!-- Admin -->
+    <section id="view-admin" class="view hidden">
+      <header class="view-head">
+        <h2>Admin — Organizations & Access</h2>
+        <button class="btn ghost" onclick="loadAdmin()">↻ Refresh</button>
+      </header>
+      <div class="card">
+        <h3>Access requests & clients</h3>
+        <p class="muted">Approve new organizations, delegate agents and phone numbers to them, and set their monthly minute limits.</p>
+        <div id="adminUsers" class="table-wrap"></div>
       </div>
     </section>
 

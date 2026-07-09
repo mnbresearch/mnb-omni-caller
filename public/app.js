@@ -37,30 +37,78 @@ function toggleTheme() {
 }
 applyTheme(localStorage.getItem('mnb_theme') || 'dark');
 
-/* ---------- Boot ---------- */
+/* ---------- Boot & auth ---------- */
+let me = null;
+
 (async function boot() {
-  const cfg = await api('/config');
-  if (cfg.authRequired && !cfg.authed) {
+  const info = await api('/me');
+  if (!info.authed) {
     $('loginGate').classList.remove('hidden');
-    $('loginBtn').onclick = doLogin;
     $('loginPassword').addEventListener('keydown', (e) => e.key === 'Enter' && doLogin());
     return;
   }
+  me = info.user;
   startApp();
 })();
 
+function showSignup() { $('loginForm').classList.add('hidden'); $('signupForm').classList.remove('hidden'); hideAuthMsgs(); }
+function showLogin() { $('signupForm').classList.add('hidden'); $('loginForm').classList.remove('hidden'); hideAuthMsgs(); }
+function hideAuthMsgs() { $('loginError').classList.add('hidden'); $('loginOk').classList.add('hidden'); }
+
 async function doLogin() {
+  hideAuthMsgs();
   try {
-    await api('/login', { method: 'POST', body: { password: $('loginPassword').value } });
+    await api('/auth/login', { method: 'POST', body: { email: $('loginEmail').value.trim(), password: $('loginPassword').value } });
+    const info = await api('/me');
+    me = info.user;
     $('loginGate').classList.add('hidden');
     startApp();
-  } catch {
+  } catch (e) {
+    $('loginError').textContent = e.message;
     $('loginError').classList.remove('hidden');
+  }
+}
+
+async function doSignup() {
+  hideAuthMsgs();
+  try {
+    const r = await api('/auth/signup', {
+      method: 'POST',
+      body: { org: $('suOrg').value.trim(), email: $('suEmail').value.trim(), password: $('suPassword').value },
+    });
+    $('loginOk').textContent = '✅ ' + (r.message || 'Request sent.');
+    $('loginOk').classList.remove('hidden');
+    setTimeout(showLogin, 2500);
+  } catch (e) {
+    $('loginError').textContent = e.message;
+    $('loginError').classList.remove('hidden');
+  }
+}
+
+async function doLogout() {
+  await api('/auth/logout', { method: 'POST' }).catch(() => {});
+  location.reload();
+}
+
+function applyRoleUi() {
+  const admin = me && me.role === 'admin';
+  $('navAdmin').classList.toggle('hidden', !admin);
+  $('newAgentBtn').classList.toggle('hidden', !admin);
+  const delBtn = document.querySelector('#view-studio .view-head .btn.ghost[onclick="deleteAgent()"]');
+  if (delBtn) delBtn.classList.toggle('hidden', !admin);
+  $('whoami').textContent = me ? `${me.org} · ${me.email}` : '';
+  if (!admin && me && me.minuteCap > 0) {
+    $('usageMeter').classList.remove('hidden');
+    const used = me.usedMinutes ?? 0;
+    const pct = Math.min(100, Math.round((used / me.minuteCap) * 100));
+    $('usageBar').style.width = pct + '%';
+    $('usageText').textContent = `${used} / ${me.minuteCap} min used`;
   }
 }
 
 async function startApp() {
   $('appShell').classList.remove('hidden');
+  applyRoleUi();
   document.querySelectorAll('.nav-item').forEach((el) =>
     el.addEventListener('click', () => switchView(el.dataset.view))
   );
@@ -72,7 +120,7 @@ async function startApp() {
 }
 
 function switchView(view) {
-  const known = ['overview', 'call', 'studio', 'logs', 'knowledge', 'campaigns', 'numbers'];
+  const known = ['overview', 'call', 'studio', 'logs', 'knowledge', 'campaigns', 'numbers', 'admin'];
   if (!known.includes(view)) view = 'overview';
   document.querySelectorAll('.view').forEach((v) => v.classList.add('hidden'));
   $('view-' + view).classList.remove('hidden');
@@ -86,6 +134,81 @@ function switchView(view) {
   if (view === 'knowledge') loadKnowledge();
   if (view === 'campaigns') loadCampaigns();
   if (view === 'numbers') loadNumbersView();
+  if (view === 'admin') loadAdmin();
+}
+
+/* ---------- Admin panel ---------- */
+let adminAllAgents = [];
+let adminAllNumbers = [];
+
+async function loadAdmin() {
+  if (!me || me.role !== 'admin') return;
+  try {
+    const [usersR, agentsR, numbersR] = await Promise.all([
+      api('/admin/users'), api('/agents'), api('/numbers'),
+    ]);
+    adminAllAgents = agentsR.bots || [];
+    adminAllNumbers = numbersR.phone_numbers || [];
+    const users = (usersR.users || []).filter((u) => u.role !== 'admin');
+    $('adminUsers').innerHTML = users.length
+      ? users.map(adminUserRow).join('')
+      : '<p class="muted">No client organizations yet. When someone requests access on the login page, they appear here.</p>';
+  } catch (e) {
+    toast('Could not load admin data: ' + e.message, 5000);
+  }
+}
+
+function adminUserRow(u) {
+  const agentChecks = adminAllAgents.map((a) =>
+    `<label style="display:inline-flex;align-items:center;gap:6px;margin:4px 12px 4px 0;font-weight:400">
+      <input type="checkbox" class="ag-${u.id}" value="${a.id}" ${u.agentIds.includes(a.id) ? 'checked' : ''} style="width:auto" /> ${show(a.name)}
+    </label>`).join('') || '<span class="muted">No agents on the account yet</span>';
+  const numberChecks = adminAllNumbers.map((n) =>
+    `<label style="display:inline-flex;align-items:center;gap:6px;margin:4px 12px 4px 0;font-weight:400">
+      <input type="checkbox" class="num-${u.id}" value="${n.id}" ${u.numberIds.includes(n.id) ? 'checked' : ''} style="width:auto" /> ${show(n.phone_number || n.number || 'Number #' + n.id)}
+    </label>`).join('') || '<span class="muted">No phone numbers on the account</span>';
+  const statusBadge = u.status === 'active' ? '<span class="badge completed">active</span>'
+    : u.status === 'pending' ? '<span class="badge no-answer">pending</span>'
+    : '<span class="badge failed">revoked</span>';
+  return `<div class="section-block">
+    <div class="row-between">
+      <div><b>${show(u.org || '—')}</b> · <span class="muted">${esc(u.email)}</span> ${statusBadge}
+        ${u.usedMinutes != null ? `<span class="muted"> · ${u.usedMinutes}/${u.minuteCap} min this month</span>` : ''}
+      </div>
+      <div>
+        ${u.status !== 'active' ? `<button class="btn primary small" onclick="adminSave('${u.id}','active')">✓ Approve</button>` : ''}
+        ${u.status === 'active' ? `<button class="btn ghost small" onclick="adminSave('${u.id}','active')">Save changes</button>
+          <button class="btn ghost small" style="color:var(--bad)" onclick="adminSave('${u.id}','rejected')">Revoke</button>` : ''}
+        <button class="btn ghost small" style="color:var(--bad)" onclick="adminDelete('${u.id}')">✕ Delete</button>
+      </div>
+    </div>
+    <label>Delegated agents</label>
+    <div>${agentChecks}</div>
+    <label>Delegated phone numbers</label>
+    <div>${numberChecks}</div>
+    <label>Monthly minute limit <span class="muted">(0 = unlimited)</span></label>
+    <input type="number" id="cap-${u.id}" value="${u.minuteCap}" min="0" style="max-width:160px" />
+  </div>`;
+}
+
+async function adminSave(userId, status) {
+  const agentIds = [...document.querySelectorAll('.ag-' + userId + ':checked')].map((c) => Number(c.value));
+  const numberIds = [...document.querySelectorAll('.num-' + userId + ':checked')].map((c) => Number(c.value));
+  const minuteCap = Number($('cap-' + userId).value) || 0;
+  try {
+    await api(`/admin/users/${userId}/update`, { method: 'POST', body: { status, agentIds, numberIds, minuteCap } });
+    toast(status === 'rejected' ? 'Access revoked' : 'Saved');
+    loadAdmin();
+  } catch (e) { toast('Save failed: ' + e.message, 5000); }
+}
+
+async function adminDelete(userId) {
+  if (!confirm('Delete this organization\'s account? They will no longer be able to sign in.')) return;
+  try {
+    await api('/admin/users/' + userId, { method: 'DELETE' });
+    toast('Account deleted');
+    loadAdmin();
+  } catch (e) { toast('Delete failed: ' + e.message, 5000); }
 }
 
 function toast(msg, ms = 2600) {
