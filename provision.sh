@@ -8,6 +8,15 @@ set -euo pipefail
 APP_DIR=/opt/mnb-omni-caller
 REPO=https://github.com/mnbresearch/mnb-omni-caller.git
 
+echo "==> Ensuring swap (1GB micro VMs OOM-kill dnf/npm without it)"
+if ! swapon --show | grep -q '/swapfile'; then
+  fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+
 echo "==> Installing Node.js 20, git, nginx"
 curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
 dnf install -y nodejs git nginx
