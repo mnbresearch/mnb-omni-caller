@@ -23,27 +23,32 @@ UD
 
 ADS=$(oci iam availability-domain list --query 'data[].name' --raw-output | tr -d '[],"' )
 INST=""
-for AD in $ADS; do
-  [ -z "$AD" ] && continue
-  echo "==> Trying A1 (2 OCPU / 12GB) in $AD"
-  if INST=$(oci compute instance launch -c "$C" --availability-domain "$AD" \
-      --shape "VM.Standard.A1.Flex" --shape-config '{"ocpus":2,"memoryInGBs":12}' \
-      --subnet-id "$SUB" --image-id "$IMG" --display-name mnb-omni-caller-a1 \
-      --assign-public-ip true --ssh-authorized-keys-file ~/.ssh/omni_key.pub \
-      --user-data-file /tmp/ud.sh --wait-for-state RUNNING \
-      --query 'data.id' --raw-output 2>/tmp/a1err); then
-    echo "==> Launched in $AD"
-    break
-  else
-    echo "   No capacity in $AD ($(tail -1 /tmp/a1err | cut -c1-80))"
-    INST=""
-  fi
+ATTEMPTS=15   # ~ up to 15 tries; capacity appears intermittently
+for i in $(seq 1 $ATTEMPTS); do
+  for AD in $ADS; do
+    [ -z "$AD" ] && continue
+    echo "==> Attempt $i: trying A1 (1 OCPU / 6GB) in $AD"
+    if INST=$(oci compute instance launch -c "$C" --availability-domain "$AD" \
+        --shape "VM.Standard.A1.Flex" --shape-config '{"ocpus":1,"memoryInGBs":6}' \
+        --subnet-id "$SUB" --image-id "$IMG" --display-name mnb-omni-caller-a1 \
+        --assign-public-ip true --ssh-authorized-keys-file ~/.ssh/omni_key.pub \
+        --user-data-file /tmp/ud.sh --wait-for-state RUNNING \
+        --query 'data.id' --raw-output 2>/tmp/a1err); then
+      echo "==> Launched in $AD"
+      break 2
+    else
+      echo "   No capacity ($(tail -1 /tmp/a1err | cut -c1-70))"
+      INST=""
+    fi
+  done
+  echo "   ...waiting 25s before retry $((i+1))"
+  sleep 25
 done
 
 if [ -z "$INST" ]; then
   echo ""
-  echo "!! A1 capacity unavailable in all ADs right now. This is common - re-run this"
-  echo "   script in a few minutes/hours, or try a different region."
+  echo "!! A1 capacity still unavailable after $ATTEMPTS attempts. Re-run this script"
+  echo "   later (capacity in Mumbai frees up at random times)."
   exit 1
 fi
 
