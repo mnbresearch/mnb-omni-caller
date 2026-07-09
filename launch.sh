@@ -40,7 +40,7 @@ IMG=$(oci compute image list -c "$C" --operating-system "Oracle Linux" \
 
 cat > /tmp/ud.sh <<'UD'
 #!/bin/bash
-curl -fsSL https://raw.githubusercontent.com/mnbresearch/mnb-omni-caller/main/deploy/provision.sh | bash > /var/log/mnb-provision.log 2>&1
+curl -fsSL https://raw.githubusercontent.com/mnbresearch/mnb-omni-caller/main/provision.sh | bash > /var/log/mnb-provision.log 2>&1
 UD
 
 echo "==> Launching instance (Always Free VM.Standard.E2.1.Micro)"
