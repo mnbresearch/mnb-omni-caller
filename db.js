@@ -1,35 +1,73 @@
 /**
- * MNB Omni Caller — tiny JSON file database.
- * Good for tens of organizations; swap for Postgres later if needed.
- * Data lives in DATA_DIR/db.json (default ./data/db.json) and persists on VPS disk.
+ * MNB Omni Caller — data store.
+ * Uses Upstash Redis (via REDIS_URL) so client accounts persist across restarts
+ * on Render's free plan. Falls back to a local JSON file if REDIS_URL is unset
+ * (handy for local development).
  */
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+const REDIS_URL = process.env.REDIS_URL || '';
+const REDIS_KEY = 'mnb:omnicaller:db';
+
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
 let state = { users: [], sessions: {}, kbOwners: {} };
+let redis = null;
 
-function load() {
-  try {
-    if (fs.existsSync(DB_FILE)) {
-      state = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-      state.users ||= [];
-      state.sessions ||= {};
-      state.kbOwners ||= {};
+function normalize() {
+  state.users ||= [];
+  state.sessions ||= {};
+  state.kbOwners ||= {};
+}
+
+/* ---------- persistence backend ---------- */
+async function init() {
+  if (REDIS_URL) {
+    const Redis = require('ioredis');
+    redis = new Redis(REDIS_URL, {
+      tls: REDIS_URL.startsWith('rediss://') ? {} : { rejectUnauthorized: false },
+      maxRetriesPerRequest: 3,
+      lazyConnect: false,
+    });
+    redis.on('error', (e) => console.error('Redis error:', e.message));
+    try {
+      const raw = await redis.get(REDIS_KEY);
+      if (raw) state = JSON.parse(raw);
+      normalize();
+      console.log('Loaded database from Upstash Redis');
+    } catch (e) {
+      console.error('Redis load failed, starting empty:', e.message);
+      normalize();
     }
-  } catch (e) {
-    console.error('DB load failed, starting fresh:', e.message);
+  } else {
+    try {
+      if (fs.existsSync(DB_FILE)) state = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+    } catch (e) { console.error('DB file load failed:', e.message); }
+    normalize();
   }
 }
 
 function save() {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  const tmp = DB_FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
-  fs.renameSync(tmp, DB_FILE);
+  if (redis) {
+    redis.set(REDIS_KEY, JSON.stringify(state)).catch((e) => console.error('Redis save failed:', e.message));
+  } else {
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      const tmp = DB_FILE + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+      fs.renameSync(tmp, DB_FILE);
+    } catch (e) { console.error('DB file save failed:', e.message); }
+  }
+}
+
+// Awaited flush — used on shutdown so the last write always lands.
+async function flush() {
+  try {
+    if (redis) await redis.set(REDIS_KEY, JSON.stringify(state));
+  } catch (e) { console.error('Flush failed:', e.message); }
 }
 
 /* ---------- passwords (scrypt, no native deps) ---------- */
@@ -60,7 +98,7 @@ function createUser({ email, password, org, role = 'client', status = 'pending' 
     passHash: hashPassword(password),
     org: String(org || '').trim(),
     role,
-    status, // pending | active | rejected
+    status,
     agentIds: [],
     numberIds: [],
     minuteCap: 500,
@@ -112,14 +150,13 @@ function ensureAdmin(email, password) {
   if (!admin) {
     admin = createUser({ email, password, org: 'MNB Research', role: 'admin', status: 'active' });
     console.log(`Admin account created: ${email}`);
-  } else if (admin.role !== 'admin') {
+  } else if (admin.role !== 'admin' || admin.status !== 'active') {
     updateUser(admin.id, { role: 'admin', status: 'active' });
   }
 }
 
-load();
-
 module.exports = {
+  init, flush,
   hashPassword, verifyPassword,
   findUserByEmail, findUserById, createUser, updateUser, deleteUser, listUsers,
   createSession, getSession, destroySession,

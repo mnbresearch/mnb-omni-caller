@@ -18,7 +18,6 @@ const BRAND = process.env.BRAND_NAME || 'MNB Omni Caller';
 const PORT = process.env.PORT || 3000;
 
 if (!KEY) { console.error('Missing OMNIDIM_API_KEY in .env'); process.exit(1); }
-db.ensureAdmin(process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD);
 
 /* ================= Auth ================= */
 function getToken(req) {
@@ -352,4 +351,12 @@ app.get('/api/llms', relay('GET', '/providers/llms'));
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-app.listen(PORT, () => console.log(`${BRAND} running at http://localhost:${PORT}`));
+(async () => {
+  await db.init();
+  db.ensureAdmin(process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD);
+  app.listen(PORT, () => console.log(`${BRAND} running at http://localhost:${PORT}`));
+})();
+
+// Flush the last write to Redis before Render stops the instance.
+process.on('SIGTERM', async () => { await db.flush(); process.exit(0); });
+process.on('SIGINT', async () => { await db.flush(); process.exit(0); });
