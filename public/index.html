@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>MNB Omni Caller — by MNB Research</title>
+<title>MNB Omni Caller &#8212; by MNB Research</title>
 <link rel="stylesheet" href="styles.css" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
@@ -20,14 +20,14 @@
       <input type="email" id="loginEmail" placeholder="Email" />
       <input type="password" id="loginPassword" placeholder="Password" style="margin-top:10px" />
       <button class="btn primary" id="loginBtn" style="width:100%;margin-top:14px" onclick="doLogin()">Sign in</button>
-      <button class="btn ghost" style="width:100%;margin-top:10px" onclick="doDemo()">▶ View live demo</button>
+      <button class="btn ghost" style="width:100%;margin-top:10px" onclick="doDemo()">&#9654; View live demo</button>
       <p class="muted" style="margin-top:16px">New organization? <a href="#" onclick="showSignup();return false" style="color:var(--accent)">Request access</a></p>
     </div>
 
     <div id="signupForm" class="hidden">
       <input type="text" id="suOrg" placeholder="Organization / company name" />
       <input type="text" id="suContact" placeholder="Your name" style="margin-top:10px" />
-      <input type="tel" id="suPhone" placeholder="Phone (with country code, e.g. +91…)" style="margin-top:10px" />
+      <input type="tel" id="suPhone" placeholder="Phone (with country code, e.g. +91&#8230;)" style="margin-top:10px" />
       <input type="email" id="suEmail" placeholder="Work email" style="margin-top:10px" />
       <input type="password" id="suPassword" placeholder="Choose a password (6+ chars)" style="margin-top:10px" />
       <textarea id="suNote" rows="2" placeholder="What are you looking for? (optional)" style="margin-top:10px"></textarea>
@@ -38,7 +38,7 @@
 
     <p id="loginError" class="error hidden"></p>
     <p id="loginOk" class="good hidden"></p>
-    <p class="muted" style="margin-top:18px"><a href="/" style="color:var(--muted)">← Back to website</a></p>
+    <p class="muted" style="margin-top:18px"><a href="/" style="color:var(--muted)">&#8592; Back to website</a></p>
   </div>
 </div>
 
@@ -53,15 +53,15 @@
       </div>
     </div>
     <nav>
-      <a href="#overview" class="nav-item active" data-view="overview"><span class="ico">◧</span> Overview</a>
-      <a href="#call" class="nav-item" data-view="call"><span class="ico">✆</span> Place a Call</a>
-      <a href="#studio" class="nav-item" data-view="studio"><span class="ico">✎</span> Agent Studio</a>
-      <a href="#logs" class="nav-item" data-view="logs"><span class="ico">≡</span> Call Logs</a>
-      <a href="#knowledge" class="nav-item" data-view="knowledge"><span class="ico">▤</span> Knowledge Base</a>
-      <a href="#campaigns" class="nav-item" data-view="campaigns"><span class="ico">⇶</span> Campaigns</a>
-      <a href="#numbers" class="nav-item" data-view="numbers"><span class="ico">☎</span> Phone Numbers</a>
-      <a href="#plan" class="nav-item" data-view="plan"><span class="ico">◈</span> Plan &amp; Usage</a>
-      <a href="#admin" class="nav-item hidden" id="navAdmin" data-view="admin"><span class="ico">⚙</span> Admin</a>
+      <a href="#overview" class="nav-item active" data-view="overview"><span class="ico">&#9703;</span> Overview</a>
+      <a href="#call" class="nav-item" data-view="call"><span class="ico">&#9990;</span> Place a Call</a>
+      <a href="#studio" class="nav-item" data-view="studio"><span class="ico">&#9998;</span> Agent Studio</a>
+      <a href="#logs" class="nav-item" data-view="logs"><span class="ico">&#8801;</span> Call Logs</a>
+      <a href="#knowledge" class="nav-item" data-view="knowledge"><span class="ico">&#9636;</span> Knowledge Base</a>
+      <a href="#campaigns" class="nav-item" data-view="campaigns"><span class="ico">&#8694;</span> Campaigns</a>
+      <a href="#numbers" class="nav-item" data-view="numbers"><span class="ico">&#9742;</span> Phone Numbers</a>
+      <a href="#plan" class="nav-item" data-view="plan"><span class="ico">&#9672;</span> Plan &amp; Usage</a>
+      <a href="#admin" class="nav-item hidden" id="navAdmin" data-view="admin"><span class="ico">&#9881;</span> Admin</a>
     </nav>
     <div class="sidebar-foot">
       <div id="usageMeter" class="hidden" style="margin-bottom:10px">
@@ -71,7 +71,7 @@
         </div>
         <div id="usageText" class="muted" style="margin-top:3px;font-size:0.75em"></div>
       </div>
-      <button class="btn ghost small theme-toggle" id="themeToggle" onclick="toggleTheme()">◐ Light mode</button>
+      <button class="btn ghost small theme-toggle" id="themeToggle" onclick="toggleTheme()">&#9680; Light mode</button>
       <div class="agent-picker">
         <label>Active agent</label>
         <select id="globalAgent"></select>
@@ -79,14 +79,14 @@
       </div>
       <div id="whoami" class="muted" style="margin-top:10px;font-size:0.75em;text-align:center"></div>
       <button class="btn ghost small" style="width:100%;margin-top:6px" onclick="doLogout()">Sign out</button>
-      <div class="foot-note">© MNB Research · Omni Caller</div>
+      <div class="foot-note">&#169; MNB Research &#183; Omni Caller</div>
     </div>
   </aside>
 
   <!-- ===== Main ===== -->
   <main class="main">
     <div id="demoBanner" class="demo-banner hidden">
-      <span>▶ <b>Live demo</b> — this is sample data. Placing calls and editing are disabled. Explore freely, then request access for the real thing.</span>
+      <span>&#9654; <b>Live demo</b> &#8212; this is sample data. Placing calls and editing are disabled. Explore freely, then request access for the real thing.</span>
       <a class="btn primary small" href="/app#signup">Request access</a>
     </div>
 
@@ -94,15 +94,15 @@
     <section id="view-overview" class="view">
       <header class="view-head">
         <h2>Overview</h2>
-        <button class="btn ghost" onclick="loadOverview()">↻ Refresh</button>
+        <button class="btn ghost" onclick="loadOverview()">&#8635; Refresh</button>
       </header>
       <div class="stat-grid">
-        <div class="stat-card"><div class="stat-label">Total calls</div><div class="stat-value" id="statTotal">–</div></div>
-        <div class="stat-card"><div class="stat-label">Completed</div><div class="stat-value good" id="statCompleted">–</div></div>
-        <div class="stat-card"><div class="stat-label">Failed / no answer</div><div class="stat-value bad" id="statFailed">–</div></div>
-        <div class="stat-card"><div class="stat-label">Avg duration</div><div class="stat-value" id="statAvgDur">–</div></div>
-        <div class="stat-card"><div class="stat-label">Positive sentiment</div><div class="stat-value good" id="statSentiment">–</div></div>
-        <div class="stat-card"><div class="stat-label">Agents</div><div class="stat-value" id="statAgents">–</div></div>
+        <div class="stat-card"><div class="stat-label">Total calls</div><div class="stat-value" id="statTotal">&#8211;</div></div>
+        <div class="stat-card"><div class="stat-label">Completed</div><div class="stat-value good" id="statCompleted">&#8211;</div></div>
+        <div class="stat-card"><div class="stat-label">Failed / no answer</div><div class="stat-value bad" id="statFailed">&#8211;</div></div>
+        <div class="stat-card"><div class="stat-label">Avg duration</div><div class="stat-value" id="statAvgDur">&#8211;</div></div>
+        <div class="stat-card"><div class="stat-label">Positive sentiment</div><div class="stat-value good" id="statSentiment">&#8211;</div></div>
+        <div class="stat-card"><div class="stat-label">Agents</div><div class="stat-value" id="statAgents">&#8211;</div></div>
       </div>
       <div class="chart-grid">
         <div class="card"><h3>Calls per day</h3><canvas id="chartVolume"></canvas></div>
@@ -124,15 +124,15 @@
           <h3>Dispatch an outbound call</h3>
           <label>Agent</label>
           <select id="callAgent"></select>
-          <label>Phone number to call <span class="muted">(with country code, e.g. +91…)</span></label>
+          <label>Phone number to call <span class="muted">(with country code, e.g. +91&#8230;)</span></label>
           <input id="callNumber" type="tel" placeholder="+15551234567" />
           <label>Call from <span class="muted">(optional)</span></label>
           <select id="callFrom"><option value="">Platform default number</option></select>
-          <label>Call context <span class="muted">(optional — passed to the agent)</span></label>
+          <label>Call context <span class="muted">(optional &#8212; passed to the agent)</span></label>
           <div id="contextRows"></div>
           <button class="btn ghost small" onclick="addContextRow()">+ Add context field</button>
           <div class="spacer"></div>
-          <button class="btn primary big" id="dispatchBtn" onclick="dispatchCall()">✆ Place call</button>
+          <button class="btn primary big" id="dispatchBtn" onclick="dispatchCall()">&#9990; Place call</button>
           <div id="dispatchResult" class="result hidden"></div>
         </div>
         <div class="card">
@@ -148,7 +148,7 @@
         <h2>Agent Studio</h2>
         <div>
           <button class="btn ghost" onclick="deleteAgent()" style="color:var(--bad)">Delete agent</button>
-          <button class="btn ghost" onclick="loadStudio()">↻ Reload</button>
+          <button class="btn ghost" onclick="loadStudio()">&#8635; Reload</button>
           <button class="btn primary" id="saveAgentBtn" onclick="saveAgent()">Save changes</button>
         </div>
       </header>
@@ -191,14 +191,14 @@
             <select id="agModel"><option value="">Keep current model</option></select>
           </div>
           <div>
-            <label>Speech speed <span class="muted">(0.5–2.0)</span></label>
+            <label>Speech speed <span class="muted">(0.5&#8211;2.0)</span></label>
             <input id="agSpeed" type="number" min="0.5" max="2" step="0.1" placeholder="1.0" />
           </div>
         </div>
       </div>
       <div class="card">
         <div class="row-between">
-          <h3>Training — conversation instructions</h3>
+          <h3>Training &#8212; conversation instructions</h3>
           <button class="btn ghost small" onclick="addSection()">+ Add section</button>
         </div>
         <p class="muted">Each section teaches the agent how to handle one part of the conversation. Edit, add, or remove sections, then Save.</p>
@@ -219,16 +219,16 @@
             <option value="failed">Failed</option>
             <option value="no-answer">No answer</option>
           </select>
-          <button class="btn ghost" onclick="exportLogsCsv()">⬇ Export CSV</button>
-          <button class="btn ghost" onclick="loadLogs(1)">↻ Refresh</button>
+          <button class="btn ghost" onclick="exportLogsCsv()">&#11015; Export CSV</button>
+          <button class="btn ghost" onclick="loadLogs(1)">&#8635; Refresh</button>
         </div>
       </header>
       <div class="card">
         <div id="logsTable" class="table-wrap"></div>
         <div class="pager">
-          <button class="btn ghost small" onclick="loadLogs(logsPage-1)">‹ Prev</button>
+          <button class="btn ghost small" onclick="loadLogs(logsPage-1)">&#8249; Prev</button>
           <span id="logsPageInfo"></span>
-          <button class="btn ghost small" onclick="loadLogs(logsPage+1)">Next ›</button>
+          <button class="btn ghost small" onclick="loadLogs(logsPage+1)">Next &#8250;</button>
         </div>
       </div>
     </section>
@@ -237,7 +237,7 @@
     <section id="view-knowledge" class="view hidden">
       <header class="view-head">
         <h2>Knowledge Base</h2>
-        <button class="btn ghost" onclick="loadKnowledge()">↻ Refresh</button>
+        <button class="btn ghost" onclick="loadKnowledge()">&#8635; Refresh</button>
       </header>
       <div class="two-col">
         <div class="card">
@@ -253,7 +253,7 @@
           <div class="spacer"></div>
           <label>Or paste text directly</label>
           <input id="kbTextTitle" type="text" placeholder="Title (e.g. Pricing 2026)" />
-          <textarea id="kbText" rows="4" placeholder="Paste any text the agent should know…"></textarea>
+          <textarea id="kbText" rows="4" placeholder="Paste any text the agent should know&#8230;"></textarea>
           <button class="btn primary" onclick="uploadKbText()">Add text source</button>
           <div id="kbUploadStatus" class="result hidden"></div>
         </div>
@@ -276,7 +276,7 @@
     <section id="view-campaigns" class="view hidden">
       <header class="view-head">
         <h2>Bulk Call Campaigns</h2>
-        <button class="btn ghost" onclick="loadCampaigns()">↻ Refresh</button>
+        <button class="btn ghost" onclick="loadCampaigns()">&#8635; Refresh</button>
       </header>
       <div class="card">
         <h3>New campaign</h3>
@@ -288,10 +288,10 @@
           </div>
           <div>
             <label>Call from</label>
-            <select id="cpFrom"><option value="">— no number available —</option></select>
+            <select id="cpFrom"><option value="">&#8212; no number available &#8212;</option></select>
           </div>
         </div>
-        <label>Contacts <span class="muted">(one per line: +number, optional name — e.g. +919876543210, Rahul)</span></label>
+        <label>Contacts <span class="muted">(one per line: +number, optional name &#8212; e.g. +919876543210, Rahul)</span></label>
         <textarea id="cpContacts" rows="5" placeholder="+919876543210, Rahul&#10;+918765432109, Priya"></textarea>
         <button class="btn primary" onclick="createCampaign()">Launch campaign</button>
         <div id="cpStatus" class="result hidden"></div>
@@ -306,7 +306,7 @@
     <section id="view-plan" class="view hidden">
       <header class="view-head">
         <h2>Plan &amp; Usage</h2>
-        <button class="btn ghost" onclick="loadPlan()">↻ Refresh</button>
+        <button class="btn ghost" onclick="loadPlan()">&#8635; Refresh</button>
       </header>
       <div id="planBody"></div>
     </section>
@@ -314,8 +314,8 @@
     <!-- Admin -->
     <section id="view-admin" class="view hidden">
       <header class="view-head">
-        <h2>Admin — Organizations & Access</h2>
-        <button class="btn ghost" onclick="loadAdmin()">↻ Refresh</button>
+        <h2>Admin &#8212; Organizations & Access</h2>
+        <button class="btn ghost" onclick="loadAdmin()">&#8635; Refresh</button>
       </header>
       <div class="card">
         <h3>Access requests & clients</h3>
@@ -328,7 +328,7 @@
     <section id="view-numbers" class="view hidden">
       <header class="view-head">
         <h2>Phone Numbers</h2>
-        <button class="btn ghost" onclick="loadNumbersView()">↻ Refresh</button>
+        <button class="btn ghost" onclick="loadNumbersView()">&#8635; Refresh</button>
       </header>
       <div class="card">
         <p class="muted">Numbers on the account can be attached to an agent so it answers inbound calls and dials out from that number. Single outbound calls work without one (a platform default number is used).</p>
@@ -344,13 +344,13 @@
   <div class="drawer-panel" style="max-width:560px">
     <div class="row-between">
       <h3>Create a new agent</h3>
-      <button class="btn ghost small" onclick="closeAgentModal()">✕ Close</button>
+      <button class="btn ghost small" onclick="closeAgentModal()">&#10005; Close</button>
     </div>
     <label>Agent name</label>
     <input id="naName" type="text" placeholder="MNB Research Support Agent" />
     <label>Welcome message</label>
     <textarea id="naWelcome" rows="2" placeholder="Hi, this is the assistant from MNB Research. How can I help you today?"></textarea>
-    <label>Purpose / instructions <span class="muted">(what this agent does — you can refine sections later in Agent Studio)</span></label>
+    <label>Purpose / instructions <span class="muted">(what this agent does &#8212; you can refine sections later in Agent Studio)</span></label>
     <textarea id="naPurpose" rows="5" placeholder="This agent qualifies inbound leads for MNB Research: it asks about their requirements, budget and timeline, and offers to book a call with the team."></textarea>
     <div class="spacer"></div>
     <button class="btn primary big" id="naCreateBtn" onclick="createAgent()">Create agent</button>
@@ -363,7 +363,7 @@
   <div class="drawer-panel">
     <div class="row-between">
       <h3 id="drawerTitle">Call detail</h3>
-      <button class="btn ghost small" onclick="closeDrawer()">✕ Close</button>
+      <button class="btn ghost small" onclick="closeDrawer()">&#10005; Close</button>
     </div>
     <div id="drawerBody"></div>
   </div>
