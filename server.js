@@ -59,13 +59,91 @@ async function notifyNewLead(u) {
   }
 }
 
+/* ============ Resend transactional emails (access-request flow) ============
+ * On every access request the platform sends two emails via Resend:
+ *   1) admin notification (to RESEND_ADMIN_EMAIL) with the requester details
+ *   2) a friendly confirmation to the requester
+ * The API key lives ONLY in the RESEND_API_KEY server env var - never in the
+ * frontend. If the key is absent, sending is skipped silently so nothing breaks.
+ * Everything runs fire-and-forget and is wrapped in try/catch.
+ */
+const RESEND_KEY = process.env.RESEND_API_KEY;
+const MAIL_FROM = process.env.RESEND_FROM || 'MNB Omni Caller <hello@updates.mnbresearch.com>';
+const MAIL_ADMIN = process.env.RESEND_ADMIN_EMAIL || 'mnbgotyou@gmail.com';
+const MAIL_REPLY_TO = process.env.RESEND_REPLY_TO || 'mnbgotyou@gmail.com';
+const APP_NAME = 'MNB Omni Caller';
+const DEMO_URL = process.env.APP_PUBLIC_URL || 'https://mnb-omni-caller.onrender.com/';
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const eesc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+async function resendSend({ to, subject, html }) {
+  if (!RESEND_KEY) return; // not configured yet -> skip silently
+  try {
+    const resp = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${RESEND_KEY}` },
+      body: JSON.stringify({ from: MAIL_FROM, to: Array.isArray(to) ? to : [to], reply_to: MAIL_REPLY_TO, subject, html }),
+    });
+    if (!resp.ok) console.error('Resend send failed:', resp.status, await resp.text().catch(() => ''));
+  } catch (e) { console.error('Resend error:', e.message); }
+}
+
+function accessEmailShell(inner) {
+  return `<div style="background:#f4f4f5;padding:24px 0;font-family:-apple-system,Segoe UI,Arial,sans-serif">
+    <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;border:1px solid #ececec">
+      <div style="background:linear-gradient(135deg,#0c0c0d,#1a1310);padding:22px 26px">
+        <span style="color:#fff;font-weight:800;font-size:17px;letter-spacing:-.2px">MNB Omni Caller</span>
+        <span style="color:#ff9a4d;font-weight:700;font-size:11px;letter-spacing:1px;text-transform:uppercase;display:block;margin-top:2px">by MNB Research</span>
+      </div>
+      <div style="padding:26px">${inner}</div>
+      <div style="border-top:1px solid #eee;padding:16px 26px;color:#8a8a8a;font-size:12px;line-height:1.6">
+        MNB Omni Caller &middot; MNB Research &middot; +91 97114 88481 &middot;
+        <a href="https://www.mnbresearch.com/mnb-omni-caller" style="color:#ee6c0a;text-decoration:none">mnbresearch.com/mnb-omni-caller</a>
+      </div>
+    </div>
+  </div>`;
+}
+
+function sendAccessRequestEmails(u) {
+  if (!u || !u.email || !EMAIL_RE.test(String(u.email))) return;
+  const name = u.contact || u.org || 'there';
+  const when = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
+  const waDigits = (u.phone || '').replace(/[^\d]/g, '');
+
+  // 1) Admin notification
+  const row = (k, v) => v ? `<tr><td style="padding:7px 0;color:#888;font-size:13px;width:130px;vertical-align:top">${k}</td><td style="padding:7px 0;font-size:14px;color:#1a1a1a">${v}</td></tr>` : '';
+  const adminInner = `
+    <p style="margin:0 0 16px;font-size:15px;color:#1a1a1a">A new organization just requested access to <b>${APP_NAME}</b>.</p>
+    <table style="width:100%;border-collapse:collapse">
+      ${row('Name', eesc(u.contact || ''))}
+      ${row('Organization', eesc(u.org || ''))}
+      ${row('Email', `<a href="mailto:${eesc(u.email)}" style="color:#ee6c0a;text-decoration:none">${eesc(u.email)}</a>`)}
+      ${row('Phone', u.phone ? `${eesc(u.phone)} &nbsp;<a href="tel:${eesc(u.phone.replace(/[^\d+]/g, ''))}" style="color:#ee6c0a;text-decoration:none">Call</a>${waDigits ? ` &middot; <a href="https://wa.me/${waDigits}" style="color:#ee6c0a;text-decoration:none">WhatsApp</a>` : ''}` : '')}
+      ${row('Looking for', eesc(u.note || ''))}
+      ${row('Requested', eesc(when) + ' IST')}
+      ${row('App', APP_NAME)}
+    </table>
+    <a href="mailto:${eesc(u.email)}" style="display:inline-block;margin-top:20px;background:linear-gradient(135deg,#ee6c0a,#ffab5e);color:#111;font-weight:700;font-size:14px;text-decoration:none;padding:11px 22px;border-radius:8px">Reply to ${eesc(name)}</a>`;
+  resendSend({ to: MAIL_ADMIN, subject: `New access request — ${APP_NAME}: ${u.contact || u.org || u.email}`, html: accessEmailShell(adminInner) });
+
+  // 2) Requester confirmation
+  const reqInner = `
+    <p style="margin:0 0 14px;font-size:15px;color:#1a1a1a">Hi ${eesc(name)},</p>
+    <p style="margin:0 0 14px;font-size:15px;color:#3a3a3a;line-height:1.65">Thanks for requesting access to <b>MNB Omni Caller</b>, our human-sounding AI voice-agent platform. We've received your request and the MNB Research team will review it and get back to you shortly &mdash; usually within one business day.</p>
+    <p style="margin:0 0 18px;font-size:15px;color:#3a3a3a;line-height:1.65">In the meantime, feel free to explore the live demo:</p>
+    <a href="${eesc(DEMO_URL)}" style="display:inline-block;background:linear-gradient(135deg,#ee6c0a,#ffab5e);color:#111;font-weight:700;font-size:14px;text-decoration:none;padding:12px 24px;border-radius:8px">&#9654; View the live demo</a>
+    <p style="margin:22px 0 0;font-size:13px;color:#8a8a8a">Warm regards,<br/>The MNB Research team</p>`;
+  resendSend({ to: u.email, subject: 'We received your access request', html: accessEmailShell(reqInner) });
+}
+
 app.post('/api/auth/signup', (req, res) => {
   const { org, email, password, contact, phone, note } = req.body || {};
   if (!org || !email || !password) return res.status(400).json({ error: 'Organization, email and password are required' });
   if (String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
   if (db.findUserByEmail(email)) return res.status(409).json({ error: 'An account with this email already exists' });
   const user = db.createUser({ email, password, org, contact, phone, note });
-  notifyNewLead(user); // fire-and-forget
+  notifyNewLead(user);            // fire-and-forget push alert (ntfy)
+  sendAccessRequestEmails(user);  // fire-and-forget Resend emails (admin + requester)
   res.json({ ok: true, message: 'Thanks! Your request is in. MNB Research will reach out and approve your access shortly.' });
 });
 
