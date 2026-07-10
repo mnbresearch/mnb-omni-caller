@@ -59,6 +59,7 @@ body {
 .spacer { height: 14px; }
 .good { color: var(--good); }
 .bad { color: var(--bad); }
+.grad-hint { background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
 
 /* ===== Animated logo mark (grey / black / white shimmer) ===== */
 .brand-mark {

@@ -45,6 +45,8 @@ let me = null;
   if (!info.authed) {
     $('loginGate').classList.remove('hidden');
     $('loginPassword').addEventListener('keydown', (e) => e.key === 'Enter' && doLogin());
+    $('loginEmail').addEventListener('keydown', (e) => e.key === 'Enter' && $('loginPassword').focus());
+    if (/signup/i.test(location.hash)) showSignup();
     return;
   }
   me = info.user;
@@ -120,7 +122,7 @@ async function startApp() {
 }
 
 function switchView(view) {
-  const known = ['overview', 'call', 'studio', 'logs', 'knowledge', 'campaigns', 'numbers', 'admin'];
+  const known = ['overview', 'call', 'studio', 'logs', 'knowledge', 'campaigns', 'numbers', 'plan', 'admin'];
   if (!known.includes(view)) view = 'overview';
   document.querySelectorAll('.view').forEach((v) => v.classList.add('hidden'));
   $('view-' + view).classList.remove('hidden');
@@ -134,7 +136,92 @@ function switchView(view) {
   if (view === 'knowledge') loadKnowledge();
   if (view === 'campaigns') loadCampaigns();
   if (view === 'numbers') loadNumbersView();
+  if (view === 'plan') loadPlan();
   if (view === 'admin') loadAdmin();
+}
+
+/* ---------- CSV export ---------- */
+async function exportLogsCsv() {
+  toast('Preparing export…');
+  try {
+    let all = [];
+    for (let p = 1; p <= 10; p++) {
+      const q = new URLSearchParams({ pageno: p, pagesize: 100 });
+      if ($('logStatus').value) q.set('call_status', $('logStatus').value);
+      const data = await api('/calls/logs?' + q);
+      const rows = data.call_log_data || [];
+      all = all.concat(rows);
+      if (rows.length < 100) break;
+    }
+    if (!all.length) return toast('No calls to export');
+    const cols = ['time_of_call', 'bot_name', 'from_number', 'to_number', 'call_direction', 'call_duration', 'call_status', 'sentiment_score'];
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""').replace(/<br\/?>/gi, ' ')}"`;
+    const csv = [cols.join(','), ...all.map((r) => cols.map((c) => esc(scrub(r[c]))).join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `mnb-omni-caller-calls-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    toast(`Exported ${all.length} calls`);
+  } catch (e) {
+    toast('Export failed: ' + e.message, 5000);
+  }
+}
+
+/* ---------- Plan & Usage ---------- */
+async function loadPlan() {
+  const info = await api('/me').catch(() => null);
+  const u = info && info.user;
+  if (!u) return;
+  const admin = u.role === 'admin';
+  if (admin) {
+    let clients = 0, active = 0;
+    try {
+      const d = await api('/admin/users');
+      const list = (d.users || []).filter((x) => x.role !== 'admin');
+      clients = list.length;
+      active = list.filter((x) => x.status === 'active').length;
+    } catch {}
+    $('planBody').innerHTML = `
+      <div class="card">
+        <h3>MNB Research — Administrator</h3>
+        <p class="muted">You have full platform access. Manage organizations, agents, numbers and limits from the Admin tab.</p>
+        <div class="stat-grid" style="grid-template-columns:repeat(3,1fr);margin-top:16px">
+          <div class="stat-card"><div class="stat-label">Client organizations</div><div class="stat-value">${clients}</div></div>
+          <div class="stat-card"><div class="stat-label">Active clients</div><div class="stat-value good">${active}</div></div>
+          <div class="stat-card"><div class="stat-label">Your plan</div><div class="stat-value">Unlimited</div></div>
+        </div>
+      </div>`;
+    return;
+  }
+  const used = u.usedMinutes ?? 0;
+  const cap = u.minuteCap || 0;
+  const pct = cap ? Math.min(100, Math.round((used / cap) * 100)) : 0;
+  const remaining = cap ? Math.max(0, cap - used) : '∞';
+  const tier = cap === 0 ? 'Scale (Unlimited)' : cap <= 500 ? 'Starter' : cap <= 1500 ? 'Growth' : 'Scale';
+  $('planBody').innerHTML = `
+    <div class="two-col">
+      <div class="card">
+        <h3>Your plan</h3>
+        <div style="font-size:1.8em;font-weight:800" class="grad-hint">${tier}</div>
+        <p class="muted" style="margin-top:6px">${u.org}</p>
+        <div class="spacer"></div>
+        <label style="margin:0 0 6px">Minutes used this month</label>
+        <div style="background:var(--panel-2);border-radius:8px;height:12px;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:var(--accent-grad)"></div>
+        </div>
+        <div class="muted" style="margin-top:6px">${used} of ${cap === 0 ? '∞' : cap} minutes · ${remaining === '∞' ? 'unlimited remaining' : remaining + ' remaining'}</div>
+      </div>
+      <div class="card">
+        <h3>What's included</h3>
+        <div class="stat-grid" style="grid-template-columns:1fr 1fr;margin-top:4px">
+          <div class="stat-card"><div class="stat-label">Agents assigned</div><div class="stat-value">${u.agentIds ? u.agentIds.length : agents.length}</div></div>
+          <div class="stat-card"><div class="stat-label">Numbers assigned</div><div class="stat-value">${u.numberIds ? u.numberIds.length : 0}</div></div>
+        </div>
+        <p class="muted" style="margin-top:14px">Need more minutes, agents or a dedicated number? Contact MNB Research to upgrade your plan.</p>
+        <a class="btn primary" href="mailto:mridulnanda2004@gmail.com?subject=Upgrade%20my%20MNB%20Omni%20Caller%20plan" style="margin-top:8px;display:inline-block">Request an upgrade</a>
+      </div>
+    </div>`;
 }
 
 /* ---------- Admin panel ---------- */

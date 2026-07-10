@@ -33,6 +33,7 @@
 
     <p id="loginError" class="error hidden"></p>
     <p id="loginOk" class="good hidden"></p>
+    <p class="muted" style="margin-top:18px"><a href="/" style="color:var(--muted)">← Back to website</a></p>
   </div>
 </div>
 
@@ -54,6 +55,7 @@
       <a href="#knowledge" class="nav-item" data-view="knowledge"><span class="ico">▤</span> Knowledge Base</a>
       <a href="#campaigns" class="nav-item" data-view="campaigns"><span class="ico">⇶</span> Campaigns</a>
       <a href="#numbers" class="nav-item" data-view="numbers"><span class="ico">☎</span> Phone Numbers</a>
+      <a href="#plan" class="nav-item" data-view="plan"><span class="ico">◈</span> Plan &amp; Usage</a>
       <a href="#admin" class="nav-item hidden" id="navAdmin" data-view="admin"><span class="ico">⚙</span> Admin</a>
     </nav>
     <div class="sidebar-foot">
@@ -208,6 +210,7 @@
             <option value="failed">Failed</option>
             <option value="no-answer">No answer</option>
           </select>
+          <button class="btn ghost" onclick="exportLogsCsv()">⬇ Export CSV</button>
           <button class="btn ghost" onclick="loadLogs(1)">↻ Refresh</button>
         </div>
       </header>
@@ -288,6 +291,15 @@
         <h3>Campaigns</h3>
         <div id="campaignsTable" class="table-wrap"></div>
       </div>
+    </section>
+
+    <!-- Plan & Usage -->
+    <section id="view-plan" class="view hidden">
+      <header class="view-head">
+        <h2>Plan &amp; Usage</h2>
+        <button class="btn ghost" onclick="loadPlan()">↻ Refresh</button>
+      </header>
+      <div id="planBody"></div>
     </section>
 
     <!-- Admin -->
