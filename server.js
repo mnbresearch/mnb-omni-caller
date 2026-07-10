@@ -29,12 +29,42 @@ function currentUser(req) {
   return s ? db.findUserById(s.userId) : null;
 }
 
+// Instant alert to the admin when a new organization requests access.
+// Set NTFY_TOPIC to a private topic name; install the free "ntfy" app and
+// subscribe to the same topic to get push notifications on your phone.
+async function notifyNewLead(u) {
+  const topic = process.env.NTFY_TOPIC;
+  if (!topic) return;
+  const body = [
+    `Org: ${u.org}`,
+    u.contact ? `Name: ${u.contact}` : '',
+    u.phone ? `Phone: ${u.phone}` : '',
+    `Email: ${u.email}`,
+    u.note ? `Wants: ${u.note}` : '',
+  ].filter(Boolean).join('\n');
+  try {
+    const headers = { Title: 'New MNB Omni Caller lead', Priority: 'high', Tags: 'telephone_receiver,rotating_light' };
+    if (u.phone) headers.Actions = `view, WhatsApp this lead, https://wa.me/${u.phone.replace(/[^\d]/g, '')}`;
+    await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, { method: 'POST', headers, body });
+  } catch (e) { console.error('Lead alert failed:', e.message); }
+  // Optional WhatsApp alert via CallMeBot (set CALLMEBOT_APIKEY + CALLMEBOT_PHONE)
+  const cbKey = process.env.CALLMEBOT_APIKEY;
+  const cbPhone = process.env.CALLMEBOT_PHONE;
+  if (cbKey && cbPhone) {
+    try {
+      const text = encodeURIComponent('New MNB Omni Caller lead\n' + body);
+      await fetch(`https://api.callmebot.com/whatsapp.php?phone=${cbPhone}&text=${text}&apikey=${cbKey}`);
+    } catch (e) { console.error('WhatsApp alert failed:', e.message); }
+  }
+}
+
 app.post('/api/auth/signup', (req, res) => {
   const { org, email, password, contact, phone, note } = req.body || {};
   if (!org || !email || !password) return res.status(400).json({ error: 'Organization, email and password are required' });
   if (String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
   if (db.findUserByEmail(email)) return res.status(409).json({ error: 'An account with this email already exists' });
-  db.createUser({ email, password, org, contact, phone, note });
+  const user = db.createUser({ email, password, org, contact, phone, note });
+  notifyNewLead(user); // fire-and-forget
   res.json({ ok: true, message: 'Thanks! Your request is in. MNB Research will reach out and approve your access shortly.' });
 });
 
