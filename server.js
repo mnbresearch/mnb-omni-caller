@@ -8,6 +8,7 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const db = require('./db');
+const demo = require('./demo');
 
 const app = express();
 app.use(express.json({ limit: '30mb' }));
@@ -87,13 +88,28 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+// One-click read-only demo login (no password) — powers "View live demo".
+app.post('/api/auth/demo', (req, res) => {
+  const u = db.getDemoUser();
+  if (!u) return res.status(503).json({ error: 'Demo is warming up, please try again in a moment.' });
+  const token = db.createSession(u.id);
+  res.setHeader('Set-Cookie', `mnb_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=86400`);
+  res.json({ ok: true });
+});
+
 app.get('/api/me', async (req, res) => {
   const user = currentUser(req);
   if (!user) return res.json({ authed: false, brand: BRAND });
-  const usage = user.role === 'client' ? await getUsageMinutes(user).catch(() => null) : null;
+  let usage = null;
+  if (user.demo) usage = 372;
+  else if (user.role === 'client') usage = await getUsageMinutes(user).catch(() => null);
   res.json({
     authed: true, brand: BRAND,
-    user: { email: user.email, org: user.org, role: user.role, minuteCap: user.minuteCap, usedMinutes: usage },
+    user: {
+      email: user.email, org: user.org, role: user.role, demo: !!user.demo,
+      minuteCap: user.minuteCap, usedMinutes: usage,
+      agentIds: user.agentIds || [], numberIds: user.numberIds || [],
+    },
   });
 });
 
@@ -103,6 +119,24 @@ app.use('/api', (req, res, next) => {
   if (!user || user.status !== 'active') return res.status(401).json({ error: 'Not authenticated' });
   req.user = user;
   next();
+});
+
+// Demo users: read-only. Serve realistic sample data for reads; block every write.
+const DEMO_WRITE_MSG = 'This is a read-only live demo. Request access to place real calls, train agents and manage your own clients.';
+app.use('/api', (req, res, next) => {
+  if (!req.user || !req.user.demo) return next();
+  if (req.method !== 'GET') return res.status(403).json({ error: DEMO_WRITE_MSG });
+  const p = req.path;
+  if (p === '/agents') return res.json({ bots: [demo.agent], total_records: 1 });
+  if (p.startsWith('/agents/')) return res.json(demo.agent);
+  if (p === '/calls/logs') return res.json(demo.pagedLogs(Number(req.query.pageno) || 1, Number(req.query.pagesize) || 20, req.query.call_status || ''));
+  if (p.startsWith('/calls/logs/')) { const id = Number(p.split('/').pop()); return res.json(demo.logs.find((l) => l.id === id) || {}); }
+  if (p === '/knowledge') return res.json({ success: true, files: demo.knowledge });
+  if (p === '/numbers') return res.json({ success: true, phone_numbers: demo.numbers });
+  if (p === '/campaigns') return res.json({ records: demo.campaigns, bulk_calls: demo.campaigns });
+  if (p === '/voices') return res.json({ voices: [] });
+  if (p === '/llms') return res.json({ llms: [] });
+  return res.json({});
 });
 
 function adminOnly(req, res, next) {
@@ -168,7 +202,7 @@ async function getUsageMinutes(user) {
 
 /* ================= Admin: user management ================= */
 app.get('/api/admin/users', adminOnly, async (req, res) => {
-  const users = await Promise.all(db.listUsers().map(async (u) => ({
+  const users = await Promise.all(db.listUsers().filter((u) => !u.demo).map(async (u) => ({
     id: u.id, email: u.email, org: u.org, role: u.role, status: u.status,
     contact: u.contact || '', phone: u.phone || '', note: u.note || '',
     agentIds: u.agentIds, numberIds: u.numberIds, minuteCap: u.minuteCap, createdAt: u.createdAt,
@@ -387,6 +421,7 @@ app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.ht
 (async () => {
   await db.init();
   db.ensureAdmin(process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD);
+  db.ensureDemo(demo.AGENT_ID);
   app.listen(PORT, () => console.log(`${BRAND} running at http://localhost:${PORT}`));
 })();
 

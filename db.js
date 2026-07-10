@@ -91,7 +91,7 @@ function findUserByEmail(email) {
 function findUserById(id) {
   return state.users.find((u) => u.id === id);
 }
-function createUser({ email, password, org, role = 'client', status = 'pending', contact = '', phone = '', note = '' }) {
+function createUser({ email, password, org, role = 'client', status = 'pending', contact = '', phone = '', note = '', demo = false }) {
   const user = {
     id: crypto.randomUUID(),
     email: String(email).toLowerCase().trim(),
@@ -102,6 +102,7 @@ function createUser({ email, password, org, role = 'client', status = 'pending',
     note: String(note || '').trim(),
     role,
     status,
+    demo: !!demo,
     agentIds: [],
     numberIds: [],
     minuteCap: 500,
@@ -158,11 +159,26 @@ function ensureAdmin(email, password) {
   }
 }
 
+/* ---------- bootstrap read-only demo account ---------- */
+const DEMO_EMAIL = 'demo@mnbomnicaller.local';
+function ensureDemo(demoAgentId) {
+  let demo = findUserByEmail(DEMO_EMAIL);
+  if (!demo) {
+    demo = createUser({
+      email: DEMO_EMAIL, password: crypto.randomBytes(12).toString('hex'),
+      org: 'Demo Organization', role: 'client', status: 'active', demo: true,
+    });
+  }
+  updateUser(demo.id, { demo: true, status: 'active', role: 'client', agentIds: [demoAgentId], minuteCap: 1500, org: 'Demo Organization' });
+  return findUserByEmail(DEMO_EMAIL);
+}
+function getDemoUser() { return findUserByEmail(DEMO_EMAIL); }
+
 module.exports = {
   init, flush,
   hashPassword, verifyPassword,
   findUserByEmail, findUserById, createUser, updateUser, deleteUser, listUsers,
   createSession, getSession, destroySession,
   setKbOwner, getKbOwner, removeKbOwner,
-  ensureAdmin,
+  ensureAdmin, ensureDemo, getDemoUser,
 };
