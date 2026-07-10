@@ -76,7 +76,14 @@ async function doSignup() {
   try {
     const r = await api('/auth/signup', {
       method: 'POST',
-      body: { org: $('suOrg').value.trim(), email: $('suEmail').value.trim(), password: $('suPassword').value },
+      body: {
+        org: $('suOrg').value.trim(),
+        contact: $('suContact').value.trim(),
+        phone: $('suPhone').value.trim(),
+        email: $('suEmail').value.trim(),
+        password: $('suPassword').value,
+        note: $('suNote').value.trim(),
+      },
     });
     $('loginOk').textContent = '✅ ' + (r.message || 'Request sent.');
     $('loginOk').classList.remove('hidden');
@@ -255,8 +262,19 @@ function adminUserRow(u) {
       <input type="checkbox" class="num-${u.id}" value="${n.id}" ${u.numberIds.includes(n.id) ? 'checked' : ''} style="width:auto" /> ${show(n.phone_number || n.number || 'Number #' + n.id)}
     </label>`).join('') || '<span class="muted">No phone numbers on the account</span>';
   const statusBadge = u.status === 'active' ? '<span class="badge completed">active</span>'
-    : u.status === 'pending' ? '<span class="badge no-answer">pending</span>'
+    : u.status === 'pending' ? '<span class="badge no-answer">new request</span>'
     : '<span class="badge failed">revoked</span>';
+  const phoneDigits = (u.phone || '').replace(/[^\d+]/g, '');
+  const waDigits = (u.phone || '').replace(/[^\d]/g, '');
+  const lead = (u.contact || u.phone || u.note) ? `
+    <div style="background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:8px 0;font-size:.92em">
+      <span class="muted">Lead contact:</span>
+      ${u.contact ? ` <b>${show(u.contact)}</b>` : ''}
+      ${u.phone ? ` · <b>${esc(u.phone)}</b>
+        <a class="btn ghost small" style="padding:2px 8px;margin-left:6px" href="tel:${esc(phoneDigits)}">✆ Call</a>
+        <a class="btn ghost small" style="padding:2px 8px" target="_blank" href="https://wa.me/${esc(waDigits)}">WhatsApp</a>` : ''}
+      ${u.note ? `<div class="muted" style="margin-top:6px">“${show(u.note)}”</div>` : ''}
+    </div>` : '';
   return `<div class="section-block">
     <div class="row-between">
       <div><b>${show(u.org || '—')}</b> · <span class="muted">${esc(u.email)}</span> ${statusBadge}
@@ -269,6 +287,7 @@ function adminUserRow(u) {
         <button class="btn ghost small" style="color:var(--bad)" onclick="adminDelete('${u.id}')">✕ Delete</button>
       </div>
     </div>
+    ${lead}
     <label>Delegated agents</label>
     <div>${agentChecks}</div>
     <label>Delegated phone numbers</label>
