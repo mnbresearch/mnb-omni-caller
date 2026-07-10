@@ -91,12 +91,15 @@ function findUserByEmail(email) {
 function findUserById(id) {
   return state.users.find((u) => u.id === id);
 }
-function createUser({ email, password, org, role = 'client', status = 'pending' }) {
+function createUser({ email, password, org, role = 'client', status = 'pending', contact = '', phone = '', note = '' }) {
   const user = {
     id: crypto.randomUUID(),
     email: String(email).toLowerCase().trim(),
     passHash: hashPassword(password),
     org: String(org || '').trim(),
+    contact: String(contact || '').trim(),
+    phone: String(phone || '').trim(),
+    note: String(note || '').trim(),
     role,
     status,
     agentIds: [],

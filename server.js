@@ -30,12 +30,12 @@ function currentUser(req) {
 }
 
 app.post('/api/auth/signup', (req, res) => {
-  const { org, email, password } = req.body || {};
+  const { org, email, password, contact, phone, note } = req.body || {};
   if (!org || !email || !password) return res.status(400).json({ error: 'Organization, email and password are required' });
   if (String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
   if (db.findUserByEmail(email)) return res.status(409).json({ error: 'An account with this email already exists' });
-  db.createUser({ email, password, org });
-  res.json({ ok: true, message: 'Access requested. The administrator will review your request.' });
+  db.createUser({ email, password, org, contact, phone, note });
+  res.json({ ok: true, message: 'Thanks! Your request is in. MNB Research will reach out and approve your access shortly.' });
 });
 
 app.post('/api/auth/login', (req, res) => {
@@ -140,6 +140,7 @@ async function getUsageMinutes(user) {
 app.get('/api/admin/users', adminOnly, async (req, res) => {
   const users = await Promise.all(db.listUsers().map(async (u) => ({
     id: u.id, email: u.email, org: u.org, role: u.role, status: u.status,
+    contact: u.contact || '', phone: u.phone || '', note: u.note || '',
     agentIds: u.agentIds, numberIds: u.numberIds, minuteCap: u.minuteCap, createdAt: u.createdAt,
     usedMinutes: u.role === 'client' && u.status === 'active' ? await getUsageMinutes(u).catch(() => null) : null,
   })));
