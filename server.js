@@ -348,7 +348,9 @@ app.get('/api/voices', relay('GET', '/providers/voices', { passQuery: true }));
 app.get('/api/llms', relay('GET', '/providers/llms'));
 
 /* ================= Static frontend ================= */
-app.use(express.static(path.join(__dirname, 'public')));
+// Public marketing site at the root; the dashboard SPA lives at /app.
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'landing.html')));
+app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 (async () => {
