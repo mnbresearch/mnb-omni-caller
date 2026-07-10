@@ -1,4 +1,4 @@
-/* ===== MNB Research — Voice AI Platform (frontend) ===== */
+/* ===== MNB Research \u2014 Voice AI Platform (frontend) ===== */
 
 const $ = (id) => document.getElementById(id);
 const api = async (path, opts = {}) => {
@@ -28,7 +28,7 @@ let lastChartLogs = null;
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
   const btn = $('themeToggle');
-  if (btn) btn.textContent = theme === 'light' ? '◑ Dark mode' : '◐ Light mode';
+  if (btn) btn.textContent = theme === 'light' ? '\u25D1 Dark mode' : '\u25D0 Light mode';
   localStorage.setItem('mnb_theme', theme);
   if (lastChartLogs) drawCharts(lastChartLogs);
 }
@@ -85,7 +85,7 @@ async function doSignup() {
         note: $('suNote').value.trim(),
       },
     });
-    $('loginOk').textContent = '✅ ' + (r.message || 'Request sent.');
+    $('loginOk').textContent = '\u2705 ' + (r.message || 'Request sent.');
     $('loginOk').classList.remove('hidden');
     setTimeout(showLogin, 2500);
   } catch (e) {
@@ -99,7 +99,7 @@ async function doDemo() {
     await api('/auth/demo', { method: 'POST' });
     location.href = '/app';
   } catch (e) {
-    alert('Demo is warming up — please try again in a few seconds.');
+    alert('Demo is warming up \u2014 please try again in a few seconds.');
   }
 }
 
@@ -116,7 +116,7 @@ function applyRoleUi() {
   $('demoBanner').classList.toggle('hidden', !demo);
   const delBtn = document.querySelector('#view-studio .view-head .btn.ghost[onclick="deleteAgent()"]');
   if (delBtn) delBtn.classList.toggle('hidden', !admin);
-  $('whoami').textContent = me ? `${me.org} · ${me.email}` : '';
+  $('whoami').textContent = me ? `${me.org} \u00B7 ${me.email}` : '';
   if (!admin && me && me.minuteCap > 0) {
     $('usageMeter').classList.remove('hidden');
     const used = me.usedMinutes ?? 0;
@@ -160,7 +160,7 @@ function switchView(view) {
 
 /* ---------- CSV export ---------- */
 async function exportLogsCsv() {
-  toast('Preparing export…');
+  toast('Preparing export\u2026');
   try {
     let all = [];
     for (let p = 1; p <= 10; p++) {
@@ -202,7 +202,7 @@ async function loadPlan() {
     } catch {}
     $('planBody').innerHTML = `
       <div class="card">
-        <h3>MNB Research — Administrator</h3>
+        <h3>MNB Research \u2014 Administrator</h3>
         <p class="muted">You have full platform access. Manage organizations, agents, numbers and limits from the Admin tab.</p>
         <div class="stat-grid" style="grid-template-columns:repeat(3,1fr);margin-top:16px">
           <div class="stat-card"><div class="stat-label">Client organizations</div><div class="stat-value">${clients}</div></div>
@@ -215,7 +215,7 @@ async function loadPlan() {
   const used = u.usedMinutes ?? 0;
   const cap = u.minuteCap || 0;
   const pct = cap ? Math.min(100, Math.round((used / cap) * 100)) : 0;
-  const remaining = cap ? Math.max(0, cap - used) : '∞';
+  const remaining = cap ? Math.max(0, cap - used) : '\u221E';
   const tier = cap === 0 ? 'Scale (Unlimited)' : cap <= 500 ? 'Starter' : cap <= 1500 ? 'Growth' : 'Scale';
   $('planBody').innerHTML = `
     <div class="two-col">
@@ -228,7 +228,7 @@ async function loadPlan() {
         <div style="background:var(--panel-2);border-radius:8px;height:12px;overflow:hidden">
           <div style="height:100%;width:${pct}%;background:var(--accent-grad)"></div>
         </div>
-        <div class="muted" style="margin-top:6px">${used} of ${cap === 0 ? '∞' : cap} minutes · ${remaining === '∞' ? 'unlimited remaining' : remaining + ' remaining'}</div>
+        <div class="muted" style="margin-top:6px">${used} of ${cap === 0 ? '\u221E' : cap} minutes \u00B7 ${remaining === '\u221E' ? 'unlimited remaining' : remaining + ' remaining'}</div>
       </div>
       <div class="card">
         <h3>What's included</h3>
@@ -281,21 +281,21 @@ function adminUserRow(u) {
     <div style="background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:8px 0;font-size:.92em">
       <span class="muted">Lead contact:</span>
       ${u.contact ? ` <b>${show(u.contact)}</b>` : ''}
-      ${u.phone ? ` · <b>${esc(u.phone)}</b>
-        <a class="btn ghost small" style="padding:2px 8px;margin-left:6px" href="tel:${esc(phoneDigits)}">✆ Call</a>
+      ${u.phone ? ` \u00B7 <b>${esc(u.phone)}</b>
+        <a class="btn ghost small" style="padding:2px 8px;margin-left:6px" href="tel:${esc(phoneDigits)}">\u2706 Call</a>
         <a class="btn ghost small" style="padding:2px 8px" target="_blank" href="https://wa.me/${esc(waDigits)}">WhatsApp</a>` : ''}
-      ${u.note ? `<div class="muted" style="margin-top:6px">“${show(u.note)}”</div>` : ''}
+      ${u.note ? `<div class="muted" style="margin-top:6px">\u201C${show(u.note)}\u201D</div>` : ''}
     </div>` : '';
   return `<div class="section-block">
     <div class="row-between">
-      <div><b>${show(u.org || '—')}</b> · <span class="muted">${esc(u.email)}</span> ${statusBadge}
-        ${u.usedMinutes != null ? `<span class="muted"> · ${u.usedMinutes}/${u.minuteCap} min this month</span>` : ''}
+      <div><b>${show(u.org || '\u2014')}</b> \u00B7 <span class="muted">${esc(u.email)}</span> ${statusBadge}
+        ${u.usedMinutes != null ? `<span class="muted"> \u00B7 ${u.usedMinutes}/${u.minuteCap} min this month</span>` : ''}
       </div>
       <div>
-        ${u.status !== 'active' ? `<button class="btn primary small" onclick="adminSave('${u.id}','active')">✓ Approve</button>` : ''}
+        ${u.status !== 'active' ? `<button class="btn primary small" onclick="adminSave('${u.id}','active')">\u2713 Approve</button>` : ''}
         ${u.status === 'active' ? `<button class="btn ghost small" onclick="adminSave('${u.id}','active')">Save changes</button>
           <button class="btn ghost small" style="color:var(--bad)" onclick="adminSave('${u.id}','rejected')">Revoke</button>` : ''}
-        <button class="btn ghost small" style="color:var(--bad)" onclick="adminDelete('${u.id}')">✕ Delete</button>
+        <button class="btn ghost small" style="color:var(--bad)" onclick="adminDelete('${u.id}')">\u2715 Delete</button>
       </div>
     </div>
     ${lead}
@@ -390,7 +390,7 @@ async function createAgent() {
       body: { name, welcome_message: welcome, context_breakdown: [{ title: 'Purpose', body: purpose }] },
     });
     el.className = 'result ok';
-    el.textContent = `✅ Agent "${name}" created.`;
+    el.textContent = `\u2705 Agent "${name}" created.`;
     el.classList.remove('hidden');
     toast('Agent created');
     await loadAgents();
@@ -401,7 +401,7 @@ async function createAgent() {
     setTimeout(() => { closeAgentModal(); switchView('studio'); }, 800);
   } catch (e) {
     el.className = 'result err';
-    el.textContent = '❌ ' + scrub(e.message);
+    el.textContent = '\u274C ' + scrub(e.message);
     el.classList.remove('hidden');
   } finally {
     $('naCreateBtn').disabled = false;
@@ -439,7 +439,7 @@ async function loadOverview() {
     $('statCompleted').textContent = completed;
     $('statFailed').textContent = failed;
     $('statAvgDur').textContent = fmtDur(avg);
-    $('statSentiment').textContent = sentiments.length ? Math.round((pos / sentiments.length) * 100) + '%' : '–';
+    $('statSentiment').textContent = sentiments.length ? Math.round((pos / sentiments.length) * 100) + '%' : '\u2013';
 
     drawCharts(logs);
 
@@ -510,7 +510,7 @@ function addContextRow(k = '', v = '') {
   row.className = 'ctx-row';
   row.innerHTML = `<input placeholder="Field (e.g. customer_name)" value="${esc(k)}" />
     <input placeholder="Value" value="${esc(v)}" />
-    <button class="btn ghost small" onclick="this.parentElement.remove()">✕</button>`;
+    <button class="btn ghost small" onclick="this.parentElement.remove()">\u2715</button>`;
   $('contextRows').appendChild(row);
 }
 
@@ -528,27 +528,27 @@ async function dispatchCall() {
   if (Object.keys(ctx).length) body.call_context = ctx;
 
   $('dispatchBtn').disabled = true;
-  $('dispatchBtn').textContent = 'Dialing…';
+  $('dispatchBtn').textContent = 'Dialing\u2026';
   try {
     const r = await api('/calls/dispatch', { method: 'POST', body });
     const el = $('dispatchResult');
     el.className = 'result ok';
-    el.innerHTML = `✅ Call dispatched to <b>${esc(to)}</b> — status: <b>${show(r.status || 'queued')}</b>${r.requestId ? ` (ref #${r.requestId})` : ''}. The transcript will appear under Call Logs once the call ends.`;
+    el.innerHTML = `\u2705 Call dispatched to <b>${esc(to)}</b> \u2014 status: <b>${show(r.status || 'queued')}</b>${r.requestId ? ` (ref #${r.requestId})` : ''}. The transcript will appear under Call Logs once the call ends.`;
     el.classList.remove('hidden');
     const agentName = agents.find((a) => a.id === agentId)?.name || 'Agent';
     const h = $('dispatchHistory');
     if (h.querySelector('p')) h.innerHTML = '';
     h.insertAdjacentHTML('afterbegin',
-      `<div class="item"><b>${esc(to)}</b> · ${show(agentName)} · ${new Date().toLocaleTimeString()} · <span class="badge completed">dispatched</span></div>`);
-    toast('Call placed ✆');
+      `<div class="item"><b>${esc(to)}</b> \u00B7 ${show(agentName)} \u00B7 ${new Date().toLocaleTimeString()} \u00B7 <span class="badge completed">dispatched</span></div>`);
+    toast('Call placed \u2706');
   } catch (e) {
     const el = $('dispatchResult');
     el.className = 'result err';
-    el.textContent = '❌ ' + scrub(e.message);
+    el.textContent = '\u274C ' + scrub(e.message);
     el.classList.remove('hidden');
   } finally {
     $('dispatchBtn').disabled = false;
-    $('dispatchBtn').textContent = '✆ Place call';
+    $('dispatchBtn').textContent = '\u2706 Place call';
   }
 }
 
@@ -563,7 +563,7 @@ async function loadStudio() {
     studioAgent = await api('/agents/' + id);
     $('agName').value = scrub(studioAgent.name || '');
     $('agWelcome').value = scrub(studioAgent.welcome_message || studioAgent.welcome_msg || '');
-    $('agVoice').value = scrub([studioAgent.voice_name, studioAgent.voice_provider, studioAgent.llm_service].filter(Boolean).join(' · '));
+    $('agVoice').value = scrub([studioAgent.voice_name, studioAgent.voice_provider, studioAgent.llm_service].filter(Boolean).join(' \u00B7 '));
     $('agVoiceProvider').value = '';
     $('agVoiceId').innerHTML = '<option value="">Pick a provider first</option>';
     $('agVoiceId').disabled = true;
@@ -598,14 +598,14 @@ async function loadVoiceOptions() {
   const sel = $('agVoiceId');
   if (!provider) { sel.innerHTML = '<option value="">Pick a provider first</option>'; sel.disabled = true; return; }
   sel.disabled = false;
-  sel.innerHTML = '<option value="">Loading voices…</option>';
+  sel.innerHTML = '<option value="">Loading voices\u2026</option>';
   try {
     const data = await api('/voices?provider=' + encodeURIComponent(provider) + '&page=1&page_size=100');
     const voices = data.voices || [];
     sel.innerHTML = voices.length
       ? voices.map((v) => {
           const vid = v.name || v.voice_id || v.external_id || v.id;
-          const label = [v.display_name || v.voice_name || v.name, v.gender, v.accent || v.language].filter(Boolean).join(' · ');
+          const label = [v.display_name || v.voice_name || v.name, v.gender, v.accent || v.language].filter(Boolean).join(' \u00B7 ');
           return `<option value="${esc(vid)}">${show(label || vid)}</option>`;
         }).join('')
       : '<option value="">No voices found for this provider</option>';
@@ -620,9 +620,9 @@ function addSection(title = '', body = '') {
   div.innerHTML = `
     <div class="section-head">
       <input class="sec-title" placeholder="Section title (e.g. Greeting & Introduction)" value="${esc(scrub(title))}" />
-      <button class="btn ghost small" onclick="this.closest('.section-block').remove()">✕ Remove</button>
+      <button class="btn ghost small" onclick="this.closest('.section-block').remove()">\u2715 Remove</button>
     </div>
-    <textarea class="sec-body" rows="5" placeholder="Instructions for this part of the conversation…">${esc(scrub(body))}</textarea>`;
+    <textarea class="sec-body" rows="5" placeholder="Instructions for this part of the conversation\u2026">${esc(scrub(body))}</textarea>`;
   $('sections').appendChild(div);
 }
 
@@ -649,14 +649,14 @@ async function saveAgent() {
     await api('/agents/' + id, { method: 'PUT', body });
     const el = $('studioStatus');
     el.className = 'result ok';
-    el.textContent = '✅ Agent updated. New calls will use this training immediately.';
+    el.textContent = '\u2705 Agent updated. New calls will use this training immediately.';
     el.classList.remove('hidden');
     toast('Agent saved');
     loadAgents();
   } catch (e) {
     const el = $('studioStatus');
     el.className = 'result err';
-    el.textContent = '❌ ' + scrub(e.message);
+    el.textContent = '\u274C ' + scrub(e.message);
     el.classList.remove('hidden');
   } finally {
     $('saveAgentBtn').disabled = false;
@@ -672,8 +672,8 @@ function logRow(l) {
     <td>${show(l.bot_name || '')}</td>
     <td>${esc(l.to_number || '')}</td>
     <td>${esc(l.call_duration || '')}</td>
-    <td><span class="badge ${esc(l.call_status || 'neutral')}">${esc(l.call_status || '—')}</span></td>
-    <td>${show(l.sentiment_score || '—')}</td>
+    <td><span class="badge ${esc(l.call_status || 'neutral')}">${esc(l.call_status || '\u2014')}</span></td>
+    <td>${show(l.sentiment_score || '\u2014')}</td>
   </tr>`;
 }
 
@@ -698,7 +698,7 @@ async function loadLogs(page = 1) {
     $('logsTable').innerHTML = logsCache.length
       ? `<table><thead><tr><th>When</th><th>Agent</th><th>To</th><th>Duration</th><th>Outcome</th><th>Sentiment</th></tr></thead><tbody>${logsCache.map(logRow).join('')}</tbody></table>`
       : '<p class="muted">No calls found.</p>';
-    $('logsPageInfo').textContent = `Page ${page} · ${total} calls`;
+    $('logsPageInfo').textContent = `Page ${page} \u00B7 ${total} calls`;
     attachRowClicks($('logsTable'), logsCache);
   } catch (e) {
     toast('Could not load logs: ' + e.message, 5000);
@@ -717,13 +717,13 @@ function openDrawer(log) {
   const transcript = parseTranscript(log.call_conversation);
   $('drawerBody').innerHTML = `
     <dl class="kv">
-      <dt>Time</dt><dd>${esc(log.time_of_call || '—')}</dd>
-      <dt>Agent</dt><dd>${show(log.bot_name || '—')}</dd>
-      <dt>Direction</dt><dd>${esc(log.call_direction || '—')}</dd>
-      <dt>From → To</dt><dd>${esc(log.from_number || '—')} → ${esc(log.to_number || '—')}</dd>
-      <dt>Duration</dt><dd>${esc(log.call_duration || '—')}</dd>
-      <dt>Outcome</dt><dd><span class="badge ${esc(log.call_status || 'neutral')}">${esc(log.call_status || '—')}</span></dd>
-      <dt>Sentiment</dt><dd>${show(log.sentiment_score || '—')}</dd>
+      <dt>Time</dt><dd>${esc(log.time_of_call || '\u2014')}</dd>
+      <dt>Agent</dt><dd>${show(log.bot_name || '\u2014')}</dd>
+      <dt>Direction</dt><dd>${esc(log.call_direction || '\u2014')}</dd>
+      <dt>From \u2192 To</dt><dd>${esc(log.from_number || '\u2014')} \u2192 ${esc(log.to_number || '\u2014')}</dd>
+      <dt>Duration</dt><dd>${esc(log.call_duration || '\u2014')}</dd>
+      <dt>Outcome</dt><dd><span class="badge ${esc(log.call_status || 'neutral')}">${esc(log.call_status || '\u2014')}</span></dd>
+      <dt>Sentiment</dt><dd>${show(log.sentiment_score || '\u2014')}</dd>
       <dt>Recording</dt><dd>${rec}</dd>
     </dl>
     ${log.sentiment_analysis_details ? `<div class="card" style="margin:10px 0"><h3>Summary</h3><p>${show(log.sentiment_analysis_details)}</p></div>` : ''}
@@ -786,7 +786,7 @@ async function uploadKb() {
   const isText = /\.(txt|md|markdown|text)$/i.test(file.name);
   if (!isPdf && !isText) return toast('Supported: .pdf, .txt, .md', 4000);
   el.className = 'result';
-  el.textContent = isPdf ? 'Uploading…' : 'Converting to PDF and uploading…';
+  el.textContent = isPdf ? 'Uploading\u2026' : 'Converting to PDF and uploading\u2026';
   el.classList.remove('hidden');
   try {
     if (isPdf) {
@@ -802,12 +802,12 @@ async function uploadKb() {
       await api('/knowledge/upload-text', { method: 'POST', body: { title: file.name, text } });
     }
     el.className = 'result ok';
-    el.textContent = `✅ ${file.name} added as a source.`;
+    el.textContent = `\u2705 ${file.name} added as a source.`;
     $('kbFile').value = '';
     loadKnowledge();
   } catch (e) {
     el.className = 'result err';
-    el.textContent = '❌ ' + scrub(e.message);
+    el.textContent = '\u274C ' + scrub(e.message);
   }
 }
 
@@ -817,18 +817,18 @@ async function uploadKbText() {
   const text = $('kbText').value.trim();
   if (!text) return toast('Paste some text first');
   el.className = 'result';
-  el.textContent = 'Converting to PDF and uploading…';
+  el.textContent = 'Converting to PDF and uploading\u2026';
   el.classList.remove('hidden');
   try {
     await api('/knowledge/upload-text', { method: 'POST', body: { title: title || 'Pasted text', text } });
     el.className = 'result ok';
-    el.textContent = `✅ "${title || 'Pasted text'}" added as a source.`;
+    el.textContent = `\u2705 "${title || 'Pasted text'}" added as a source.`;
     $('kbTextTitle').value = '';
     $('kbText').value = '';
     loadKnowledge();
   } catch (e) {
     el.className = 'result err';
-    el.textContent = '❌ ' + scrub(e.message);
+    el.textContent = '\u274C ' + scrub(e.message);
   }
 }
 
@@ -837,17 +837,17 @@ async function uploadKbUrl() {
   const url = $('kbUrl').value.trim();
   if (!url) return toast('Enter a web page URL first');
   el.className = 'result';
-  el.textContent = 'Fetching page, converting to PDF…';
+  el.textContent = 'Fetching page, converting to PDF\u2026';
   el.classList.remove('hidden');
   try {
     await api('/knowledge/upload-url', { method: 'POST', body: { url } });
     el.className = 'result ok';
-    el.textContent = `✅ Page imported as a source.`;
+    el.textContent = `\u2705 Page imported as a source.`;
     $('kbUrl').value = '';
     loadKnowledge();
   } catch (e) {
     el.className = 'result err';
-    el.textContent = '❌ ' + scrub(e.message);
+    el.textContent = '\u274C ' + scrub(e.message);
   }
 }
 
@@ -860,11 +860,11 @@ async function attachKb() {
     if ($('kbWhen').value.trim()) body.when_to_use = $('kbWhen').value.trim();
     const r = await api('/knowledge/attach', { method: 'POST', body });
     el.className = 'result ok';
-    el.textContent = '✅ ' + scrub(r.message || 'Attached to agent.');
+    el.textContent = '\u2705 ' + scrub(r.message || 'Attached to agent.');
     el.classList.remove('hidden');
   } catch (e) {
     el.className = 'result err';
-    el.textContent = '❌ ' + scrub(e.message);
+    el.textContent = '\u274C ' + scrub(e.message);
     el.classList.remove('hidden');
   }
 }
@@ -876,11 +876,11 @@ async function detachKb() {
   try {
     const r = await api('/knowledge/detach', { method: 'POST', body: { file_ids: ids, agent_id: activeAgentId() } });
     el.className = 'result ok';
-    el.textContent = '✅ ' + scrub(r.message || 'Detached from agent.');
+    el.textContent = '\u2705 ' + scrub(r.message || 'Detached from agent.');
     el.classList.remove('hidden');
   } catch (e) {
     el.className = 'result err';
-    el.textContent = '❌ ' + scrub(e.message);
+    el.textContent = '\u274C ' + scrub(e.message);
     el.classList.remove('hidden');
   }
 }
@@ -906,11 +906,11 @@ async function loadCampaigns() {
       ? `<table><thead><tr><th>ID</th><th>Name</th><th>Agent</th><th>Status</th><th>Contacts</th><th>Created</th><th>Actions</th></tr></thead><tbody>
         ${list.map((c) => `<tr>
           <td>${esc(c.id)}</td>
-          <td>${show(c.name || c.campaign_name || '—')}</td>
-          <td>${show(c.bot_name || c.agent_name || '—')}</td>
-          <td><span class="badge neutral">${esc(c.status || '—')}</span></td>
-          <td>${esc(c.total_contacts ?? c.contacts_count ?? '—')}</td>
-          <td>${esc(c.created_at || c.created_date || '—')}</td>
+          <td>${show(c.name || c.campaign_name || '\u2014')}</td>
+          <td>${show(c.bot_name || c.agent_name || '\u2014')}</td>
+          <td><span class="badge neutral">${esc(c.status || '\u2014')}</span></td>
+          <td>${esc(c.total_contacts ?? c.contacts_count ?? '\u2014')}</td>
+          <td>${esc(c.created_at || c.created_date || '\u2014')}</td>
           <td>
             <button class="btn ghost small" onclick="campaignAction(${c.id}, 'pause')">Pause</button>
             <button class="btn ghost small" onclick="campaignAction(${c.id}, 'resume')">Resume</button>
@@ -928,7 +928,7 @@ async function createCampaign() {
   const name = $('cpName').value.trim();
   const fromId = $('cpFrom').value;
   if (!name) return toast('Give the campaign a name');
-  if (!fromId) return toast('A phone number on the account is required for campaigns — see the Phone Numbers tab', 6000);
+  if (!fromId) return toast('A phone number on the account is required for campaigns \u2014 see the Phone Numbers tab', 6000);
   const contacts = $('cpContacts').value.split('\n').map((l) => l.trim()).filter(Boolean).map((line) => {
     const [num, ...rest] = line.split(',').map((x) => x.trim());
     const c = { phone_number: num };
@@ -939,17 +939,17 @@ async function createCampaign() {
   const bad = contacts.find((c) => !/^\+\d{7,15}$/.test(c.phone_number));
   if (bad) return toast(`Invalid number: ${bad.phone_number} (use +countrycode format)`, 5000);
   el.className = 'result';
-  el.textContent = 'Launching campaign…';
+  el.textContent = 'Launching campaign\u2026';
   el.classList.remove('hidden');
   try {
     await api('/campaigns', { method: 'POST', body: { name, phone_number_id: String(fromId), contact_list: contacts } });
     el.className = 'result ok';
-    el.textContent = `✅ Campaign "${name}" launched with ${contacts.length} contact(s).`;
+    el.textContent = `\u2705 Campaign "${name}" launched with ${contacts.length} contact(s).`;
     $('cpName').value = ''; $('cpContacts').value = '';
     loadCampaigns();
   } catch (e) {
     el.className = 'result err';
-    el.textContent = '❌ ' + scrub(e.message);
+    el.textContent = '\u274C ' + scrub(e.message);
   }
 }
 
@@ -983,7 +983,7 @@ async function loadNumbersView() {
     $('numbersTable').innerHTML = list.length
       ? `<table><thead><tr><th>Number</th><th>Attached agent</th><th>Actions</th></tr></thead><tbody>
         ${list.map((n) => `<tr>
-          <td><b>${show(n.phone_number || n.number || '—')}</b></td>
+          <td><b>${show(n.phone_number || n.number || '\u2014')}</b></td>
           <td>${show(n.bot_name || n.agent_name || (n.attached_agent_id ? 'Agent #' + n.attached_agent_id : 'Not attached'))}</td>
           <td>
             <select id="numAg${n.id}" style="width:auto;display:inline-block;margin-right:8px">${agentOpts}</select>
@@ -991,7 +991,7 @@ async function loadNumbersView() {
             <button class="btn ghost small" onclick="detachNumber(${n.id})">Detach</button>
           </td>
         </tr>`).join('')}</tbody></table>`
-      : `<p class="muted">No phone numbers on this account yet. Single outbound calls still work using the platform's default number. To get a dedicated number for inbound calls and campaigns, one can be purchased in the account's Numbers Shop — ask your platform admin (that's you, MNB Research).</p>`;
+      : `<p class="muted">No phone numbers on this account yet. Single outbound calls still work using the platform's default number. To get a dedicated number for inbound calls and campaigns, one can be purchased in the account's Numbers Shop \u2014 ask your platform admin (that's you, MNB Research).</p>`;
   } catch (e) {
     $('numbersTable').innerHTML = '<p class="muted">Could not load numbers: ' + esc(scrub(e.message)) + '</p>';
   }
