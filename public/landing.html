@@ -154,6 +154,7 @@ footer .bot{border-top:1px solid var(--border);padding-top:20px;font-size:.85rem
       <a href="https://www.mnbresearch.com/contactus" target="_blank" rel="noopener">Contact</a>
     </div>
     <div class="cta">
+      <a class="btn ghost" href="#" onclick="mnbDemo();return false">View demo</a>
       <a class="btn ghost" href="/app">Sign in</a>
       <a class="btn primary" href="/app#signup">Request access</a>
     </div>
@@ -167,8 +168,8 @@ footer .bot{border-top:1px solid var(--border);padding-top:20px;font-size:.85rem
       <h1>AI voice agents that <span class="grad-text">sound human</span> — working for your business 24/7.</h1>
       <p class="lead">MNB Omni Caller places calls, qualifies leads, books appointments and answers customers around the clock. Train an agent in minutes, hand it to your clients, and watch every conversation turn into results.</p>
       <div class="cta">
-        <a class="btn primary" href="/app#signup">Request access →</a>
-        <a class="btn ghost" href="#how">See how it works</a>
+        <a class="btn primary" href="#" onclick="mnbDemo();return false">▶ View live demo</a>
+        <a class="btn ghost" href="/app#signup">Request access</a>
       </div>
       <div class="mini">
         <span><b>1000+</b> voices</span>
@@ -320,6 +321,13 @@ footer .bot{border-top:1px solid var(--border);padding-top:20px;font-size:.85rem
 </footer>
 
 <script>
+async function mnbDemo(){
+  try{
+    const r = await fetch('/api/auth/demo',{method:'POST'});
+    if(!r.ok) throw 0;
+    location.href='/app';
+  }catch(e){ location.href='/app'; }
+}
 document.getElementById('yr').textContent=new Date().getFullYear();
 const io=new IntersectionObserver((es)=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}),{threshold:.12});
 document.querySelectorAll('.reveal').forEach(el=>io.observe(el));

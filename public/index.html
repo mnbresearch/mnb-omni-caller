@@ -20,6 +20,7 @@
       <input type="email" id="loginEmail" placeholder="Email" />
       <input type="password" id="loginPassword" placeholder="Password" style="margin-top:10px" />
       <button class="btn primary" id="loginBtn" style="width:100%;margin-top:14px" onclick="doLogin()">Sign in</button>
+      <button class="btn ghost" style="width:100%;margin-top:10px" onclick="doDemo()">▶ View live demo</button>
       <p class="muted" style="margin-top:16px">New organization? <a href="#" onclick="showSignup();return false" style="color:var(--accent)">Request access</a></p>
     </div>
 
@@ -84,6 +85,10 @@
 
   <!-- ===== Main ===== -->
   <main class="main">
+    <div id="demoBanner" class="demo-banner hidden">
+      <span>▶ <b>Live demo</b> — this is sample data. Placing calls and editing are disabled. Explore freely, then request access for the real thing.</span>
+      <a class="btn primary small" href="/app#signup">Request access</a>
+    </div>
 
     <!-- Overview -->
     <section id="view-overview" class="view">

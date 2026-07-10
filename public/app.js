@@ -94,15 +94,26 @@ async function doSignup() {
   }
 }
 
+async function doDemo() {
+  try {
+    await api('/auth/demo', { method: 'POST' });
+    location.href = '/app';
+  } catch (e) {
+    alert('Demo is warming up — please try again in a few seconds.');
+  }
+}
+
 async function doLogout() {
   await api('/auth/logout', { method: 'POST' }).catch(() => {});
-  location.reload();
+  location.href = '/';
 }
 
 function applyRoleUi() {
   const admin = me && me.role === 'admin';
+  const demo = me && me.demo;
   $('navAdmin').classList.toggle('hidden', !admin);
   $('newAgentBtn').classList.toggle('hidden', !admin);
+  $('demoBanner').classList.toggle('hidden', !demo);
   const delBtn = document.querySelector('#view-studio .view-head .btn.ghost[onclick="deleteAgent()"]');
   if (delBtn) delBtn.classList.toggle('hidden', !admin);
   $('whoami').textContent = me ? `${me.org} · ${me.email}` : '';
