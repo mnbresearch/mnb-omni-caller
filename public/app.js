@@ -226,7 +226,7 @@ async function loadPlan() {
           <div class="stat-card"><div class="stat-label">Numbers assigned</div><div class="stat-value">${u.numberIds ? u.numberIds.length : 0}</div></div>
         </div>
         <p class="muted" style="margin-top:14px">Need more minutes, agents or a dedicated number? Contact MNB Research to upgrade your plan.</p>
-        <a class="btn primary" href="mailto:mridulnanda2004@gmail.com?subject=Upgrade%20my%20MNB%20Omni%20Caller%20plan" style="margin-top:8px;display:inline-block">Request an upgrade</a>
+        <a class="btn primary" href="https://wa.me/919711488481?text=Hi%20MNB%20Research,%20I'd%20like%20to%20upgrade%20my%20Omni%20Caller%20plan." target="_blank" rel="noopener" style="margin-top:8px;display:inline-block">Request an upgrade</a>
       </div>
     </div>`;
 }
