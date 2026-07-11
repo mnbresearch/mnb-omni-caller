@@ -88,17 +88,33 @@ async function resendSend({ to, subject, html }) {
   } catch (e) { console.error('Resend error:', e.message); }
 }
 
+const LOGO_URL = process.env.EMAIL_LOGO_URL || 'https://www.mnbresearch.com/web/image/2429';
+const OR_GRAD = 'linear-gradient(135deg,#ee6c0a,#ffab5e)';
+
 function accessEmailShell(inner) {
-  return `<div style="background:#f4f4f5;padding:24px 0;font-family:-apple-system,Segoe UI,Arial,sans-serif">
-    <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;border:1px solid #ececec">
-      <div style="background:linear-gradient(135deg,#0c0c0d,#1a1310);padding:22px 26px">
-        <span style="color:#fff;font-weight:800;font-size:17px;letter-spacing:-.2px">MNB Omni Caller</span>
-        <span style="color:#ff9a4d;font-weight:700;font-size:11px;letter-spacing:1px;text-transform:uppercase;display:block;margin-top:2px">by MNB Research</span>
+  return `<div style="background:#f4f4f5;padding:28px 12px;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif">
+    <div style="max-width:580px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #ececec;box-shadow:0 8px 30px rgba(0,0,0,.06)">
+      <div style="background:linear-gradient(135deg,#0c0c0d,#1a1310);padding:24px 28px">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td style="vertical-align:middle"><img src="${LOGO_URL}" width="46" height="46" alt="MNB Omni Caller" style="display:block;border-radius:11px;border:0" /></td>
+          <td style="vertical-align:middle;padding-left:14px">
+            <div style="color:#fff;font-weight:800;font-size:18px;letter-spacing:-.3px">MNB Omni Caller</div>
+            <div style="color:#ff9a4d;font-weight:700;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;margin-top:3px">AI Voice Agents &middot; by MNB Research</div>
+          </td>
+        </tr></table>
       </div>
-      <div style="padding:26px">${inner}</div>
-      <div style="border-top:1px solid #eee;padding:16px 26px;color:#8a8a8a;font-size:12px;line-height:1.6">
-        MNB Omni Caller &middot; MNB Research &middot; +91 97114 88481 &middot;
-        <a href="https://www.mnbresearch.com/mnb-omni-caller" style="color:#ee6c0a;text-decoration:none">mnbresearch.com/mnb-omni-caller</a>
+      <div style="padding:28px 28px 24px">${inner}</div>
+      <div style="border-top:1px solid #eee;padding:20px 28px;background:#fafafa">
+        <div style="font-size:13px;color:#666;margin-bottom:10px">
+          <a href="${DEMO_URL}" style="color:#ee6c0a;text-decoration:none;font-weight:600">Live demo</a> &nbsp;&middot;&nbsp;
+          <a href="https://www.mnbresearch.com/mnb-omni-caller" style="color:#ee6c0a;text-decoration:none;font-weight:600">Product page</a> &nbsp;&middot;&nbsp;
+          <a href="https://wa.me/919711488481" style="color:#ee6c0a;text-decoration:none;font-weight:600">WhatsApp</a> &nbsp;&middot;&nbsp;
+          <a href="mailto:contact@mnbresearch.com" style="color:#ee6c0a;text-decoration:none;font-weight:600">Email</a>
+        </div>
+        <div style="font-size:11px;color:#9a9a9a;line-height:1.7">
+          MNB Omni Caller &middot; MNB Research &middot; +91 97114 88481<br/>
+          <span style="color:#b0b0b0">Shark Tank India featured &middot; DPIIT-recognised</span>
+        </div>
       </div>
     </div>
   </div>`;
@@ -107,33 +123,47 @@ function accessEmailShell(inner) {
 function sendAccessRequestEmails(u) {
   if (!u || !u.email || !EMAIL_RE.test(String(u.email))) return;
   const name = u.contact || u.org || 'there';
+  const firstName = String(name).trim().split(/\s+/)[0] || 'there';
   const when = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
   const waDigits = (u.phone || '').replace(/[^\d]/g, '');
+  const btn = (href, label) => `<a href="${href}" style="display:inline-block;background:${OR_GRAD};color:#111;font-weight:700;font-size:14px;text-decoration:none;padding:12px 24px;border-radius:8px">${label}</a>`;
 
   // 1) Admin notification
-  const row = (k, v) => v ? `<tr><td style="padding:7px 0;color:#888;font-size:13px;width:130px;vertical-align:top">${k}</td><td style="padding:7px 0;font-size:14px;color:#1a1a1a">${v}</td></tr>` : '';
+  const row = (k, v) => v ? `<tr><td style="padding:8px 0;color:#888;font-size:13px;width:130px;vertical-align:top">${k}</td><td style="padding:8px 0;font-size:14px;color:#1a1a1a">${v}</td></tr>` : '';
   const adminInner = `
-    <p style="margin:0 0 16px;font-size:15px;color:#1a1a1a">A new organization just requested access to <b>${APP_NAME}</b>.</p>
-    <table style="width:100%;border-collapse:collapse">
+    <div style="display:inline-block;background:rgba(238,108,10,.1);color:#c25a08;font-weight:700;font-size:11px;letter-spacing:.6px;text-transform:uppercase;padding:5px 12px;border-radius:20px;margin-bottom:14px">New access request</div>
+    <p style="margin:0 0 18px;font-size:15px;color:#1a1a1a;line-height:1.6">A new organization just requested access to <b>${APP_NAME}</b>. Here are their details:</p>
+    <table style="width:100%;border-collapse:collapse;border-top:1px solid #f0f0f0">
       ${row('Name', eesc(u.contact || ''))}
       ${row('Organization', eesc(u.org || ''))}
       ${row('Email', `<a href="mailto:${eesc(u.email)}" style="color:#ee6c0a;text-decoration:none">${eesc(u.email)}</a>`)}
-      ${row('Phone', u.phone ? `${eesc(u.phone)} &nbsp;<a href="tel:${eesc(u.phone.replace(/[^\d+]/g, ''))}" style="color:#ee6c0a;text-decoration:none">Call</a>${waDigits ? ` &middot; <a href="https://wa.me/${waDigits}" style="color:#ee6c0a;text-decoration:none">WhatsApp</a>` : ''}` : '')}
+      ${row('Phone', eesc(u.phone || ''))}
       ${row('Looking for', eesc(u.note || ''))}
       ${row('Requested', eesc(when) + ' IST')}
-      ${row('App', APP_NAME)}
     </table>
-    <a href="mailto:${eesc(u.email)}" style="display:inline-block;margin-top:20px;background:linear-gradient(135deg,#ee6c0a,#ffab5e);color:#111;font-weight:700;font-size:14px;text-decoration:none;padding:11px 22px;border-radius:8px">Reply to ${eesc(name)}</a>`;
+    <div style="margin-top:22px">
+      ${btn('mailto:' + eesc(u.email), 'Reply to ' + eesc(firstName))}
+      ${waDigits ? '&nbsp;&nbsp;<a href="https://wa.me/' + waDigits + '" style="display:inline-block;border:1px solid #25D366;color:#128C4B;font-weight:700;font-size:14px;text-decoration:none;padding:11px 22px;border-radius:8px">WhatsApp</a>' : ''}
+    </div>`;
   resendSend({ to: MAIL_ADMIN, subject: `New access request — ${APP_NAME}: ${u.contact || u.org || u.email}`, html: accessEmailShell(adminInner) });
 
   // 2) Requester confirmation
+  const step = (n, t) => `<tr><td style="vertical-align:top;padding:5px 12px 5px 0"><div style="width:24px;height:24px;border-radius:50%;background:${OR_GRAD};color:#111;font-weight:800;font-size:12px;text-align:center;line-height:24px">${n}</div></td><td style="vertical-align:middle;font-size:14px;color:#3a3a3a;padding:5px 0">${t}</td></tr>`;
   const reqInner = `
-    <p style="margin:0 0 14px;font-size:15px;color:#1a1a1a">Hi ${eesc(name)},</p>
-    <p style="margin:0 0 14px;font-size:15px;color:#3a3a3a;line-height:1.65">Thanks for requesting access to <b>MNB Omni Caller</b>, our human-sounding AI voice-agent platform. We've received your request and the MNB Research team will review it and get back to you shortly &mdash; usually within one business day.</p>
-    <p style="margin:0 0 18px;font-size:15px;color:#3a3a3a;line-height:1.65">In the meantime, feel free to explore the live demo:</p>
-    <a href="${eesc(DEMO_URL)}" style="display:inline-block;background:linear-gradient(135deg,#ee6c0a,#ffab5e);color:#111;font-weight:700;font-size:14px;text-decoration:none;padding:12px 24px;border-radius:8px">&#9654; View the live demo</a>
-    <p style="margin:22px 0 0;font-size:13px;color:#8a8a8a">Warm regards,<br/>The MNB Research team</p>`;
-  resendSend({ to: u.email, subject: 'We received your access request', html: accessEmailShell(reqInner) });
+    <p style="margin:0 0 14px;font-size:16px;color:#1a1a1a">Hi ${eesc(firstName)},</p>
+    <p style="margin:0 0 18px;font-size:15px;color:#3a3a3a;line-height:1.65">Thank you for requesting access to <b>MNB Omni Caller</b> &mdash; MNB Research's human-sounding AI voice-agent platform that places real calls, qualifies leads, books appointments and answers customers 24/7 in 90+ languages. Your request is in, and our team will review it and get back to you shortly (usually within one business day).</p>
+    <div style="background:#faf7f3;border:1px solid #f0e6da;border-radius:12px;padding:16px 18px;margin:0 0 22px">
+      <div style="font-weight:700;font-size:12px;letter-spacing:.6px;text-transform:uppercase;color:#c25a08;margin-bottom:10px">What happens next</div>
+      <table style="border-collapse:collapse">
+        ${step(1, 'We review your request')}
+        ${step(2, 'We approve access and set up your agent')}
+        ${step(3, "You're placing live calls &mdash; often the same day")}
+      </table>
+    </div>
+    <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.65">While you wait, explore the platform live:</p>
+    <div>${btn(eesc(DEMO_URL), '&#9654; View the live demo')}</div>
+    <p style="margin:26px 0 0;font-size:14px;color:#3a3a3a">Warm regards,<br/><b>The MNB Research team</b></p>`;
+  resendSend({ to: u.email, subject: 'We received your access request — MNB Omni Caller', html: accessEmailShell(reqInner) });
 }
 
 app.post('/api/auth/signup', (req, res) => {
