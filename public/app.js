@@ -1017,3 +1017,133 @@ async function detachNumber(numberId) {
     toast('Detach failed: ' + scrub(e.message), 5000);
   }
 }
+
+/* ===== Dashboard UX enhancements: command palette, quick actions, logs search, mobile nav ===== */
+(function () {
+  if (window.__mnbEnhanced) return; window.__mnbEnhanced = true;
+
+  var css = ''
+    + '.qa-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}'
+    + '@media(max-width:1000px){.qa-grid{grid-template-columns:repeat(2,1fr)}}'
+    + '.qa-card{display:flex;gap:12px;align-items:center;text-align:left;cursor:pointer;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;transition:.15s;color:var(--text);font:inherit}'
+    + '.qa-card:hover{border-color:var(--accent);transform:translateY(-2px)}'
+    + '.qa-ic{width:38px;height:38px;flex-shrink:0;border-radius:10px;background:var(--accent-grad);color:#111;display:flex;align-items:center;justify-content:center;font-size:19px;font-weight:800}'
+    + '.qa-t{font-weight:700;font-size:.95em}.qa-s{color:var(--muted);font-size:.8em}'
+    + '.logs-search{max-width:280px}'
+    + '.cmdk-back{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:none;align-items:flex-start;justify-content:center}'
+    + '.cmdk-back.on{display:flex}'
+    + '.cmdk{margin-top:12vh;width:560px;max-width:92vw;background:var(--panel);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.5)}'
+    + '.cmdk input{width:100%;border:none;border-bottom:1px solid var(--border);background:transparent;color:var(--text);font-size:1.05em;padding:16px 18px;outline:none;margin:0;border-radius:0}'
+    + '.cmdk-list{max-height:340px;overflow-y:auto;padding:6px}'
+    + '.cmdk-item{display:flex;gap:12px;align-items:center;padding:11px 14px;border-radius:8px;cursor:pointer;color:var(--text)}'
+    + '.cmdk-item .ic{width:26px;text-align:center;color:var(--accent)}'
+    + '.cmdk-item small{color:var(--muted);margin-left:auto;font-size:.75em}'
+    + '.cmdk-item.sel,.cmdk-item:hover{background:var(--panel-2)}'
+    + '.kbd{display:inline-block;border:1px solid var(--border);border-bottom-width:2px;border-radius:5px;padding:1px 6px;font-size:.72em;color:var(--muted);font-family:monospace}'
+    + '.mnav{display:none;position:fixed;top:12px;left:12px;z-index:80;width:42px;height:42px;border-radius:10px;background:var(--panel);border:1px solid var(--border);color:var(--text);font-size:20px;cursor:pointer}'
+    + '@media(max-width:820px){.mnav{display:block}.sidebar{position:fixed;z-index:70;left:0;top:0;transform:translateX(-100%);transition:.25s;box-shadow:0 0 40px rgba(0,0,0,.4)}.shell.navopen .sidebar{transform:none}.main{padding-top:64px}}';
+  var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
+
+  var VIEWS = [
+    { v: 'overview', ic: '&#9703;', t: 'Overview', s: 'Dashboard' },
+    { v: 'call', ic: '&#9990;', t: 'Place a Call', s: 'Dispatch' },
+    { v: 'studio', ic: '&#9998;', t: 'Agent Studio', s: 'Train agents' },
+    { v: 'logs', ic: '&#8801;', t: 'Call Logs', s: 'History' },
+    { v: 'knowledge', ic: '&#9636;', t: 'Knowledge Base', s: 'Sources' },
+    { v: 'campaigns', ic: '&#8694;', t: 'Campaigns', s: 'Bulk calls' },
+    { v: 'numbers', ic: '&#9742;', t: 'Phone Numbers', s: 'Numbers' },
+    { v: 'plan', ic: '&#9672;', t: 'Plan & Usage', s: 'Account' }
+  ];
+  function isAdmin() { try { return !document.getElementById('navAdmin').classList.contains('hidden'); } catch (e) { return false; } }
+
+  function injectQuickActions() {
+    var ov = document.getElementById('view-overview');
+    if (!ov || ov.querySelector('.qa-grid')) return;
+    var acts = [
+      { v: 'call', ic: '&#9990;', t: 'Place a call', s: 'Dial a number now' },
+      { v: 'studio', ic: '&#9998;', t: 'Train an agent', s: 'Edit voice and script' },
+      { v: 'knowledge', ic: '&#9636;', t: 'Add knowledge', s: 'Upload a source' },
+      { v: 'campaigns', ic: '&#8694;', t: 'Launch a campaign', s: 'Bulk outbound' }
+    ];
+    var grid = document.createElement('div'); grid.className = 'qa-grid';
+    grid.innerHTML = acts.map(function (a) {
+      return '<button class="qa-card" data-v="' + a.v + '"><span class="qa-ic">' + a.ic + '</span><span><span class="qa-t">' + a.t + '</span><br><span class="qa-s">' + a.s + '</span></span></button>';
+    }).join('');
+    var head = ov.querySelector('.view-head');
+    if (head && head.nextSibling) ov.insertBefore(grid, head.nextSibling); else ov.insertBefore(grid, ov.firstChild);
+    grid.addEventListener('click', function (e) { var b = e.target.closest('.qa-card'); if (b) switchView(b.dataset.v); });
+  }
+
+  function injectLogsSearch() {
+    var head = document.querySelector('#view-logs .view-head .filters');
+    if (!head || head.querySelector('.logs-search')) return;
+    var inp = document.createElement('input'); inp.className = 'logs-search'; inp.type = 'search';
+    inp.placeholder = 'Search calls...';
+    head.insertBefore(inp, head.firstChild);
+    inp.addEventListener('input', function () {
+      var q = inp.value.toLowerCase();
+      document.querySelectorAll('#logsTable table tbody tr').forEach(function (tr) {
+        tr.style.display = tr.textContent.toLowerCase().indexOf(q) > -1 ? '' : 'none';
+      });
+    });
+  }
+
+  var back = document.createElement('div'); back.className = 'cmdk-back';
+  back.innerHTML = '<div class="cmdk"><input type="text" placeholder="Jump to a section or action..." /><div class="cmdk-list"></div></div>';
+  document.body.appendChild(back);
+  var input = back.querySelector('input'), list = back.querySelector('.cmdk-list'), sel = 0, items = [];
+
+  function buildCmds() {
+    var vs = VIEWS.slice();
+    if (isAdmin()) vs.push({ v: 'admin', ic: '&#9881;', t: 'Admin', s: 'Clients' });
+    var cmds = vs.map(function (x) { return { ic: x.ic, t: x.t, s: x.s, run: function () { switchView(x.v); } }; });
+    cmds.push({ ic: '&#9681;', t: 'Toggle light / dark theme', s: 'Theme', run: function () { toggleTheme(); } });
+    cmds.push({ ic: '&#8617;', t: 'Sign out', s: 'Session', run: function () { doLogout(); } });
+    return cmds;
+  }
+  function render(q) {
+    var all = buildCmds().filter(function (c) { return (c.t + ' ' + c.s).toLowerCase().indexOf(q.toLowerCase()) > -1; });
+    items = all; if (sel >= all.length) sel = 0;
+    list.innerHTML = all.map(function (c, i) {
+      return '<div class="cmdk-item' + (i === sel ? ' sel' : '') + '" data-i="' + i + '"><span class="ic">' + c.ic + '</span><span>' + c.t + '</span><small>' + c.s + '</small></div>';
+    }).join('') || '<div class="cmdk-item"><span>No matches</span></div>';
+  }
+  function openK() { back.classList.add('on'); input.value = ''; sel = 0; render(''); setTimeout(function () { input.focus(); }, 20); }
+  function closeK() { back.classList.remove('on'); }
+  input.addEventListener('input', function () { sel = 0; render(input.value); });
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowDown') { sel = Math.min(sel + 1, items.length - 1); render(input.value); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { sel = Math.max(sel - 1, 0); render(input.value); e.preventDefault(); }
+    else if (e.key === 'Enter') { if (items[sel]) { closeK(); items[sel].run(); } }
+    else if (e.key === 'Escape') { closeK(); }
+  });
+  list.addEventListener('click', function (e) { var it = e.target.closest('.cmdk-item'); if (it && it.dataset.i != null) { var c = items[+it.dataset.i]; closeK(); if (c) c.run(); } });
+  back.addEventListener('click', function (e) { if (e.target === back) closeK(); });
+  document.addEventListener('keydown', function (e) {
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); back.classList.contains('on') ? closeK() : openK(); }
+  });
+
+  var mnav = document.createElement('button'); mnav.className = 'mnav'; mnav.innerHTML = '&#9776;'; mnav.setAttribute('aria-label', 'Menu');
+  document.body.appendChild(mnav);
+  mnav.addEventListener('click', function () { var sh = document.querySelector('.shell'); if (sh) sh.classList.toggle('navopen'); });
+  document.addEventListener('click', function (e) { if (e.target.closest('.nav-item')) { var sh = document.querySelector('.shell'); if (sh) sh.classList.remove('navopen'); } });
+
+  try {
+    var foot = document.querySelector('.sidebar-foot');
+    if (foot && !foot.querySelector('.cmdk-hint')) {
+      var h = document.createElement('div'); h.className = 'foot-note cmdk-hint';
+      h.innerHTML = 'Press <span class="kbd">Ctrl</span> <span class="kbd">K</span> to search';
+      foot.appendChild(h);
+    }
+  } catch (e) { }
+
+  function enhance() { injectQuickActions(); injectLogsSearch(); }
+  enhance();
+  window.addEventListener('load', enhance);
+  setTimeout(enhance, 800);
+  var _sv = window.switchView;
+  if (typeof _sv === 'function' && !_sv.__wrapped) {
+    window.switchView = function () { var r = _sv.apply(this, arguments); setTimeout(enhance, 60); return r; };
+    window.switchView.__wrapped = true;
+  }
+})();
