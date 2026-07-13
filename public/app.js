@@ -1147,3 +1147,113 @@ async function detachNumber(numberId) {
     window.switchView.__wrapped = true;
   }
 })();
+
+/* ===== Dashboard enhancements v2: sortable logs, copy in call drawer, setup checklist ===== */
+(function () {
+  if (window.__mnbEnhanced2) return; window.__mnbEnhanced2 = true;
+
+  var css = ''
+    + '#logsTable table thead th{cursor:pointer;user-select:none;white-space:nowrap}'
+    + '#logsTable table thead th .srt{opacity:.4;font-size:.8em;margin-left:4px}'
+    + '#logsTable table thead th.act .srt{opacity:1;color:var(--accent)}'
+    + '.copy-btn{cursor:pointer;background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 12px;font:inherit;font-size:.82em;font-weight:600}'
+    + '.copy-btn:hover{border-color:var(--accent);color:var(--accent)}'
+    + '.setup-card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;margin-bottom:18px}'
+    + '.setup-card h3{margin:0 0 4px;font-size:1.02em}'
+    + '.setup-steps{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}'
+    + '@media(max-width:1000px){.setup-steps{grid-template-columns:repeat(2,1fr)}}'
+    + '.setup-step{display:flex;gap:10px;align-items:center;background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;cursor:pointer;color:var(--text)}'
+    + '.setup-step .tick{width:22px;height:22px;flex-shrink:0;border-radius:50%;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--muted)}'
+    + '.setup-step.done .tick{background:var(--good);border-color:var(--good);color:#fff}'
+    + '.setup-step .lbl{font-size:.88em;font-weight:600}'
+    + '.setup-bar{height:6px;border-radius:6px;background:var(--panel-2);overflow:hidden;margin-top:12px}'
+    + '.setup-bar > div{height:100%;background:var(--accent-grad)}';
+  var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
+
+  var sortState = { col: -1, dir: 1 };
+  function makeSortable() {
+    var table = document.querySelector('#logsTable table');
+    if (!table) return;
+    var ths = table.querySelectorAll('thead th');
+    if (!ths.length || ths[0].__srt) return;
+    ths.forEach(function (th, i) {
+      th.__srt = true;
+      var s = document.createElement('span'); s.className = 'srt'; s.innerHTML = '&#8645;'; th.appendChild(s);
+      th.addEventListener('click', function () { sortLogs(i, table, ths); });
+    });
+  }
+  function cellVal(tr, i) {
+    var td = tr.children[i]; if (!td) return '';
+    var t = td.textContent.trim();
+    var dm = t.match(/^(\d+)m\s*(\d+)s$/); if (dm) return (+dm[1]) * 60 + (+dm[2]);
+    var d2 = t.match(/^(\d+):(\d+)$/); if (d2) return (+d2[1]) * 60 + (+d2[2]);
+    var n = t.replace(/[%,]/g, ''); if (n !== '' && !isNaN(n)) return parseFloat(n);
+    var dt = Date.parse(t); if (!isNaN(dt)) return dt;
+    return t.toLowerCase();
+  }
+  function sortLogs(i, table, ths) {
+    var dir = (sortState.col === i) ? -sortState.dir : 1; sortState = { col: i, dir: dir };
+    ths.forEach(function (th, j) { th.classList.toggle('act', j === i); var s = th.querySelector('.srt'); if (s) s.innerHTML = j === i ? (dir > 0 ? '&#9650;' : '&#9660;') : '&#8645;'; });
+    var tb = table.querySelector('tbody'); if (!tb) return;
+    var rows = [].slice.call(tb.querySelectorAll('tr'));
+    rows.sort(function (a, b) { var va = cellVal(a, i), vb = cellVal(b, i); if (va < vb) return -1 * dir; if (va > vb) return 1 * dir; return 0; });
+    rows.forEach(function (r) { tb.appendChild(r); });
+  }
+  var logsWrap = document.getElementById('logsTable');
+  if (logsWrap) { new MutationObserver(function () { makeSortable(); }).observe(logsWrap, { childList: true, subtree: true }); }
+  makeSortable();
+
+  function addCopy() {
+    var body = document.getElementById('drawerBody');
+    if (!body || body.querySelector('.copy-btn') || !body.textContent.trim()) return;
+    var btn = document.createElement('button'); btn.className = 'copy-btn'; btn.textContent = 'Copy details';
+    btn.style.marginBottom = '12px';
+    btn.addEventListener('click', function () {
+      var txt = body.innerText || body.textContent;
+      (navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(txt) : Promise.reject())
+        .then(function () { btn.textContent = 'Copied!'; setTimeout(function () { btn.textContent = 'Copy details'; }, 1500); if (window.toast) toast('Call details copied'); })
+        .catch(function () { if (window.toast) toast('Copy not available in this browser'); });
+    });
+    body.insertBefore(btn, body.firstChild);
+  }
+  var drawer = document.getElementById('drawer');
+  if (drawer) { new MutationObserver(function () { if (!drawer.classList.contains('hidden')) setTimeout(addCopy, 120); }).observe(drawer, { attributes: true, attributeFilter: ['class'] }); }
+
+  async function buildSetup() {
+    try {
+      var ov = document.getElementById('view-overview');
+      if (!ov || document.getElementById('setupCard')) return;
+      var me = await fetch('/api/me', { cache: 'no-store' }).then(function (r) { return r.json(); }).catch(function () { return {}; });
+      var u = me.user || {};
+      if (u.role === 'admin') return;
+      var dismissed = false; try { dismissed = localStorage.getItem('mnb_setup_hide') === '1'; } catch (e) { }
+      if (dismissed) return;
+      var agents = 0, numbers = 0, kb = 0, calls = 0;
+      try { var a = await fetch('/api/agents').then(function (r) { return r.json(); }); agents = (a.bots || []).length; } catch (e) { }
+      try { var n = await fetch('/api/numbers').then(function (r) { return r.json(); }); numbers = (n.phone_numbers || []).length; } catch (e) { }
+      try { var k = await fetch('/api/knowledge').then(function (r) { return r.json(); }); kb = (k.files || []).length; } catch (e) { }
+      try { var l = await fetch('/api/calls/logs?pageno=1&pagesize=1').then(function (r) { return r.json(); }); calls = (l.total_records != null ? l.total_records : (l.call_log_data || []).length); } catch (e) { }
+      var steps = [
+        { done: agents > 0, lbl: 'Train an agent', v: 'studio' },
+        { done: kb > 0, lbl: 'Add knowledge', v: 'knowledge' },
+        { done: numbers > 0, lbl: 'Add a number', v: 'numbers' },
+        { done: calls > 0, lbl: 'Place a call', v: 'call' }
+      ];
+      var doneCount = steps.filter(function (s) { return s.done; }).length;
+      if (doneCount === steps.length) return;
+      var card = document.createElement('div'); card.className = 'setup-card'; card.id = 'setupCard';
+      card.innerHTML = '<div class="row-between"><div><h3>Get started with MNB Omni Caller</h3><div class="muted" style="font-size:.86em">Finish setup to start running live calls under your brand.</div></div>'
+        + '<button class="btn ghost small" id="setupHide">Dismiss</button></div>'
+        + '<div class="setup-bar"><div style="width:' + Math.round(doneCount / steps.length * 100) + '%"></div></div>'
+        + '<div class="setup-steps">' + steps.map(function (s) { return '<div class="setup-step' + (s.done ? ' done' : '') + '" data-v="' + s.v + '"><span class="tick">' + (s.done ? '&#10003;' : '') + '</span><span class="lbl">' + s.lbl + '</span></div>'; }).join('') + '</div>';
+      var qa = ov.querySelector('.qa-grid');
+      if (qa && qa.nextSibling) ov.insertBefore(card, qa.nextSibling);
+      else { var head = ov.querySelector('.view-head'); if (head && head.nextSibling) ov.insertBefore(card, head.nextSibling); else ov.insertBefore(card, ov.firstChild); }
+      card.addEventListener('click', function (e) {
+        if (e.target.id === 'setupHide') { try { localStorage.setItem('mnb_setup_hide', '1'); } catch (x) { } card.remove(); return; }
+        var s = e.target.closest('.setup-step'); if (s) switchView(s.dataset.v);
+      });
+    } catch (e) { }
+  }
+  buildSetup();
+})();
