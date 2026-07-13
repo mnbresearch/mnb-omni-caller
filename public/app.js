@@ -1257,3 +1257,80 @@ async function detachNumber(numberId) {
   }
   buildSetup();
 })();
+
+/* ===== Dashboard enhancements v3: log filter chips, density toggle, studio test-call ===== */
+(function () {
+  if (window.__mnbEnhanced3) return; window.__mnbEnhanced3 = true;
+
+  var css = ''
+    + '.log-chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}'
+    + '.log-chip{cursor:pointer;background:var(--panel);border:1px solid var(--border);color:var(--muted);border-radius:20px;padding:5px 14px;font:inherit;font-size:.85em;font-weight:600}'
+    + '.log-chip:hover{border-color:var(--accent);color:var(--text)}'
+    + '.log-chip.on{background:var(--accent-grad);border-color:transparent;color:#111}'
+    + '.compact .main{padding:16px 22px}'
+    + '.compact .card{padding:14px 16px;margin-bottom:14px}'
+    + '.compact .stat-card{padding:12px}'
+    + '.compact .stat-value{font-size:1.35em}'
+    + '.compact table th,.compact table td{padding:7px 10px}'
+    + '.compact .view-head{margin-bottom:12px}'
+    + '.compact .qa-card{padding:10px 12px}';
+  var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
+
+  var weekOn = false;
+  function applyWeek(on) {
+    weekOn = on; var cut = Date.now() - 7 * 864e5;
+    document.querySelectorAll('#logsTable table tbody tr').forEach(function (tr) {
+      if (!on) { if (tr.dataset.weekHidden) { tr.style.display = ''; tr.removeAttribute('data-week-hidden'); } return; }
+      var c = tr.children[0]; var t = c ? c.textContent.trim() : ''; var d = Date.parse(t);
+      if (!isNaN(d) && d < cut) { tr.style.display = 'none'; tr.dataset.weekHidden = '1'; }
+      else if (tr.dataset.weekHidden) { tr.style.display = ''; tr.removeAttribute('data-week-hidden'); }
+    });
+  }
+  function injectLogChips() {
+    var v = document.getElementById('view-logs'); if (!v || v.querySelector('.log-chips')) return;
+    var sel = document.getElementById('logStatus'); if (!sel) return;
+    var chips = [['All', ''], ['Completed', 'completed'], ['Busy', 'busy'], ['Failed', 'failed'], ['No answer', 'no-answer']];
+    var wrap = document.createElement('div'); wrap.className = 'log-chips';
+    wrap.innerHTML = chips.map(function (c, i) { return '<button class="log-chip' + (i === 0 ? ' on' : '') + '" data-s="' + c[1] + '">' + c[0] + '</button>'; }).join('')
+      + '<button class="log-chip" data-week="1">This week</button>';
+    var head = v.querySelector('.view-head');
+    if (head && head.nextSibling) v.insertBefore(wrap, head.nextSibling); else v.insertBefore(wrap, v.firstChild);
+    wrap.addEventListener('click', function (e) {
+      var b = e.target.closest('.log-chip'); if (!b) return;
+      if (b.dataset.week != null) { b.classList.toggle('on'); applyWeek(b.classList.contains('on')); return; }
+      [].forEach.call(wrap.querySelectorAll('.log-chip[data-s]'), function (x) { x.classList.toggle('on', x === b); });
+      sel.value = b.dataset.s; sel.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+  var lw = document.getElementById('logsTable');
+  if (lw) { new MutationObserver(function () { if (weekOn) applyWeek(true); }).observe(lw, { childList: true, subtree: true }); }
+
+  function densityInit() {
+    var foot = document.querySelector('.sidebar-foot'); if (!foot || document.getElementById('densToggle')) return;
+    var saved = ''; try { saved = localStorage.getItem('mnb_density') || ''; } catch (e) { }
+    if (saved === 'compact') document.body.classList.add('compact');
+    var b = document.createElement('button'); b.id = 'densToggle'; b.className = 'btn ghost small'; b.style.width = '100%'; b.style.marginTop = '8px';
+    function lbl() { b.textContent = document.body.classList.contains('compact') ? 'Comfortable view' : 'Compact view'; }
+    lbl();
+    b.addEventListener('click', function () { document.body.classList.toggle('compact'); try { localStorage.setItem('mnb_density', document.body.classList.contains('compact') ? 'compact' : ''); } catch (e) { } lbl(); });
+    var theme = document.getElementById('themeToggle');
+    if (theme && theme.parentNode) theme.parentNode.insertBefore(b, theme.nextSibling); else foot.insertBefore(b, foot.firstChild);
+  }
+
+  function studioTestBtn() {
+    var head = document.querySelector('#view-studio .view-head > div');
+    if (!head || document.getElementById('testCallBtn')) return;
+    var b = document.createElement('button'); b.id = 'testCallBtn'; b.className = 'btn ghost'; b.innerHTML = '&#9990; Test call';
+    head.insertBefore(b, head.firstChild);
+    b.addEventListener('click', function () {
+      var ga = document.getElementById('globalAgent');
+      switchView('call');
+      setTimeout(function () { var ca = document.getElementById('callAgent'); if (ca && ga) { ca.value = ga.value; ca.dispatchEvent(new Event('change', { bubbles: true })); } if (window.toast) toast('Loaded this agent in Place a Call'); }, 350);
+    });
+  }
+
+  function run() { injectLogChips(); densityInit(); studioTestBtn(); }
+  run();
+  window.addEventListener('load', run);
+  setTimeout(run, 900);
+})();
