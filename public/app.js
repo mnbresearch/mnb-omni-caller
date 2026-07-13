@@ -1424,3 +1424,114 @@ async function detachNumber(numberId) {
   window.addEventListener('load', run);
   setTimeout(run, 1000);
 })();
+
+/* ===== Dashboard enhancements v5: admin bell, duplicate agent, shortcuts help, auto-refresh ===== */
+(function () {
+  if (window.__mnbEnhanced5) return; window.__mnbEnhanced5 = true;
+
+  var css = ''
+    + '.mnb-bell{position:fixed;top:14px;right:18px;z-index:85;width:42px;height:42px;border-radius:10px;background:var(--panel);border:1px solid var(--border);color:var(--text);font-size:18px;cursor:pointer}'
+    + '.mnb-bell .bdg{position:absolute;top:-6px;right:-6px;background:var(--bad);color:#fff;border-radius:10px;font-size:11px;font-weight:700;padding:1px 6px;min-width:18px;text-align:center}'
+    + '.bell-panel{position:fixed;top:64px;right:18px;z-index:85;width:330px;max-width:92vw;background:var(--panel);border:1px solid var(--border);border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.45);display:none;overflow:hidden}'
+    + '.bell-panel.on{display:block}'
+    + '.bell-panel h4{margin:0;padding:14px 16px;border-bottom:1px solid var(--border);font-size:.95em}'
+    + '.bell-list{max-height:360px;overflow-y:auto}'
+    + '.bell-item{padding:12px 16px;border-bottom:1px solid var(--border);font-size:.9em}'
+    + '.bell-item b{display:block}'
+    + '.bell-item .em{color:var(--muted);font-size:.85em}'
+    + '.bell-item .act{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap}'
+    + '.sc-back{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:210;display:none;align-items:center;justify-content:center}'
+    + '.sc-back.on{display:flex}'
+    + '.sc-modal{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:22px 26px;width:420px;max-width:92vw}'
+    + '.sc-modal h3{margin:0 0 14px}'
+    + '.sc-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:.92em}'
+    + '.sc-row:last-child{border-bottom:none}';
+  var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
+
+  function esc2(s) { return String(s == null ? '' : s).replace(/[<>&"]/g, function (c) { return { '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]; }); }
+
+  var scBack = document.createElement('div'); scBack.className = 'sc-back';
+  var shortcuts = [['Ctrl / Cmd + K', 'Open command palette'], ['1 - 9', 'Jump to a section'], ['?', 'Show this help'], ['Esc', 'Close dialogs']];
+  scBack.innerHTML = '<div class="sc-modal"><h3>Keyboard shortcuts</h3>' + shortcuts.map(function (s) { return '<div class="sc-row"><span class="kbd">' + s[0] + '</span><span>' + s[1] + '</span></div>'; }).join('') + '<div style="margin-top:16px;text-align:right"><button class="btn ghost small" id="scClose">Close</button></div></div>';
+  document.body.appendChild(scBack);
+  function scOpen() { scBack.classList.add('on'); }
+  function scClose() { scBack.classList.remove('on'); }
+  scBack.addEventListener('click', function (e) { if (e.target === scBack || e.target.id === 'scClose') scClose(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    var t = e.target; var tn = (t && t.tagName) || '';
+    if (tn === 'INPUT' || tn === 'TEXTAREA' || tn === 'SELECT' || (t && t.isContentEditable)) return;
+    if (e.key === '?') { e.preventDefault(); scBack.classList.contains('on') ? scClose() : scOpen(); }
+    else if (e.key === 'Escape') scClose();
+  });
+
+  var autoTimer = null;
+  function injectAutoRefresh() {
+    var head = document.querySelector('#view-overview .view-head');
+    if (!head || document.getElementById('autoRefreshBtn')) return;
+    var b = document.createElement('button'); b.id = 'autoRefreshBtn'; b.className = 'btn ghost'; b.style.marginRight = '8px';
+    function lbl() { b.textContent = autoTimer ? 'Auto-refresh: on' : 'Auto-refresh: off'; b.classList.toggle('primary', !!autoTimer); }
+    lbl();
+    b.addEventListener('click', function () {
+      if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+      else { autoTimer = setInterval(function () { var ov = document.getElementById('view-overview'); if (typeof loadOverview === 'function' && ov && !ov.classList.contains('hidden')) loadOverview(); }, 30000); if (window.toast) toast('Auto-refresh every 30s'); }
+      lbl();
+    });
+    var refreshBtn = head.querySelector('button'); if (refreshBtn) head.insertBefore(b, refreshBtn); else head.appendChild(b);
+  }
+
+  function initBell() {
+    if (document.getElementById('mnbBell')) return;
+    var btn = document.createElement('button'); btn.id = 'mnbBell'; btn.className = 'mnb-bell'; btn.setAttribute('aria-label', 'Access requests'); btn.innerHTML = '&#128276;<span class="bdg" style="display:none">0</span>';
+    var panel = document.createElement('div'); panel.className = 'bell-panel'; panel.innerHTML = '<h4>Access requests</h4><div class="bell-list"></div>';
+    document.body.appendChild(btn); document.body.appendChild(panel);
+    var badge = btn.querySelector('.bdg'); var list = panel.querySelector('.bell-list');
+    btn.addEventListener('click', function (e) { e.stopPropagation(); panel.classList.toggle('on'); if (panel.classList.contains('on')) refresh(); });
+    document.addEventListener('click', function (e) { if (!panel.contains(e.target) && e.target !== btn) panel.classList.remove('on'); });
+    async function refresh() {
+      var d = await fetch('/api/admin/users').then(function (r) { return r.json(); }).catch(function () { return { users: [] }; });
+      var pending = (d.users || []).filter(function (u) { return u.status === 'pending' && !u.demo; });
+      badge.textContent = pending.length; badge.style.display = pending.length ? '' : 'none';
+      list.innerHTML = pending.length ? pending.map(function (u) {
+        var wa = (u.phone || '').replace(/[^\d]/g, '');
+        return '<div class="bell-item"><b>' + esc2(u.org || u.contact || u.email) + '</b><span class="em">' + esc2(u.email) + (u.phone ? ' &middot; ' + esc2(u.phone) : '') + '</span>'
+          + (u.note ? '<div class="em" style="margin-top:4px">' + esc2(u.note) + '</div>' : '')
+          + '<div class="act"><button class="btn primary small" data-approve="' + u.id + '">Approve</button>'
+          + (wa ? '<a class="btn ghost small" target="_blank" href="https://wa.me/' + wa + '">WhatsApp</a>' : '')
+          + '<button class="btn ghost small" data-openadmin="1">Open Admin</button></div></div>';
+      }).join('') : '<div class="bell-item em">No pending requests</div>';
+    }
+    list.addEventListener('click', function (e) {
+      var ap = e.target.getAttribute('data-approve');
+      if (ap) { fetch('/api/admin/users/' + ap + '/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'active' }) }).then(function () { if (window.toast) toast('Access approved'); refresh(); if (typeof loadAdmin === 'function') loadAdmin(); }); return; }
+      if (e.target.getAttribute('data-openadmin')) { panel.classList.remove('on'); if (typeof switchView === 'function') switchView('admin'); }
+    });
+    refresh(); setInterval(refresh, 60000);
+  }
+
+  function studioDuplicateBtn() {
+    var head = document.querySelector('#view-studio .view-head > div');
+    if (!head || document.getElementById('dupAgentBtn')) return;
+    var b = document.createElement('button'); b.id = 'dupAgentBtn'; b.className = 'btn ghost'; b.textContent = 'Duplicate';
+    head.insertBefore(b, head.firstChild);
+    b.addEventListener('click', function () {
+      if (typeof openAgentModal === 'function') openAgentModal();
+      setTimeout(function () {
+        var n = document.getElementById('naName'), w = document.getElementById('naWelcome');
+        var cn = document.getElementById('agName'), cw = document.getElementById('agWelcome');
+        if (n && cn) n.value = (cn.value || 'Agent') + ' (copy)';
+        if (w && cw) w.value = cw.value || '';
+        if (window.toast) toast('Review and create your duplicated agent');
+      }, 250);
+    });
+  }
+
+  function run() { injectAutoRefresh(); }
+  run();
+  window.addEventListener('load', run);
+  setTimeout(run, 1000);
+  (async function () {
+    var me = await fetch('/api/me', { cache: 'no-store' }).then(function (r) { return r.json(); }).catch(function () { return {}; });
+    if (me.user && me.user.role === 'admin') { initBell(); studioDuplicateBtn(); }
+  })();
+})();
