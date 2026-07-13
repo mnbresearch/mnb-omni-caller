@@ -1334,3 +1334,93 @@ async function detachNumber(numberId) {
   window.addEventListener('load', run);
   setTimeout(run, 900);
 })();
+
+/* ===== Dashboard enhancements v4: export current view, saved filters, number-key nav ===== */
+(function () {
+  if (window.__mnbEnhanced4) return; window.__mnbEnhanced4 = true;
+
+  var css = ''
+    + '.saved-chip{display:inline-flex;align-items:center;gap:7px}'
+    + '.saved-chip .x{cursor:pointer;opacity:.55;font-weight:700;line-height:1}'
+    + '.saved-chip .x:hover{opacity:1;color:var(--bad)}'
+    + '.log-chip.add{border-style:dashed;color:var(--muted)}';
+  var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
+
+  function csvQuote(v) { return '"' + String(v == null ? '' : v).replace(/"/g, '""').replace(/\s+/g, ' ').trim() + '"'; }
+  function download(name, text) {
+    var blob = new Blob([text], { type: 'text/csv' });
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  }
+  function headerLabel(th) { var c = th.cloneNode(true); var s = c.querySelector('.srt'); if (s) s.remove(); return c.textContent.trim(); }
+
+  function injectExportView() {
+    var filters = document.querySelector('#view-logs .view-head .filters');
+    if (!filters || document.getElementById('exportViewBtn')) return;
+    var b = document.createElement('button'); b.id = 'exportViewBtn'; b.className = 'btn ghost'; b.innerHTML = '&#8615; Export view';
+    filters.appendChild(b);
+    b.addEventListener('click', function () {
+      var table = document.querySelector('#logsTable table'); if (!table) return;
+      var ths = [].slice.call(table.querySelectorAll('thead th'));
+      var head = ths.map(headerLabel);
+      var rows = [].slice.call(table.querySelectorAll('tbody tr')).filter(function (tr) { return tr.style.display !== 'none'; });
+      if (!rows.length) { if (window.toast) toast('No rows to export'); return; }
+      var lines = [head.map(csvQuote).join(',')];
+      rows.forEach(function (tr) { lines.push([].slice.call(tr.children).map(function (td) { return csvQuote(td.textContent); }).join(',')); });
+      download('mnb-omni-caller-view-' + new Date().toISOString().slice(0, 10) + '.csv', lines.join('\n'));
+      if (window.toast) toast('Exported ' + rows.length + ' calls');
+    });
+  }
+
+  function getSaved() { try { return JSON.parse(localStorage.getItem('mnb_saved_filters') || '[]'); } catch (e) { return []; } }
+  function setSaved(a) { try { localStorage.setItem('mnb_saved_filters', JSON.stringify(a)); } catch (e) { } }
+
+  function statusChip(s) { return document.querySelector('#view-logs .log-chip[data-s="' + s + '"]'); }
+  function weekChip() { return document.querySelector('#view-logs .log-chip[data-week]'); }
+  function applySaved(f) {
+    var sc = statusChip(f.status || ''); if (sc) sc.click();
+    var wc = weekChip(); if (wc && wc.classList.contains('on') !== !!f.week) wc.click();
+  }
+  function renderSaved() {
+    var chipsRow = document.querySelector('#view-logs .log-chips'); if (!chipsRow) return;
+    var old = chipsRow.querySelector('.saved-wrap'); if (old) old.remove();
+    var wrap = document.createElement('span'); wrap.className = 'saved-wrap'; wrap.style.display = 'inline-flex'; wrap.style.gap = '8px'; wrap.style.flexWrap = 'wrap';
+    getSaved().forEach(function (f, i) {
+      var c = document.createElement('button'); c.className = 'log-chip saved-chip';
+      c.innerHTML = '<span class="nm">' + f.name.replace(/[<>&]/g, '') + '</span><span class="x" data-i="' + i + '">&#215;</span>';
+      c.addEventListener('click', function (e) {
+        if (e.target.classList.contains('x')) { var arr = getSaved(); arr.splice(+e.target.dataset.i, 1); setSaved(arr); renderSaved(); return; }
+        applySaved(f);
+      });
+      wrap.appendChild(c);
+    });
+    var add = document.createElement('button'); add.className = 'log-chip add'; add.innerHTML = '&#43; Save filter';
+    add.addEventListener('click', function () {
+      var sel = document.getElementById('logStatus'); var wc = weekChip();
+      var status = sel ? sel.value : ''; var week = wc ? wc.classList.contains('on') : false;
+      var name = window.prompt('Name this filter:', (status || 'All') + (week ? ' - this week' : ''));
+      if (!name) return;
+      var arr = getSaved(); arr.push({ name: name.slice(0, 24), status: status, week: week }); setSaved(arr); renderSaved();
+      if (window.toast) toast('Filter saved');
+    });
+    wrap.appendChild(add);
+    chipsRow.appendChild(wrap);
+  }
+
+  var NAV = ['overview', 'call', 'studio', 'logs', 'knowledge', 'campaigns', 'numbers', 'plan', 'admin'];
+  document.addEventListener('keydown', function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    var t = e.target; var tn = (t && t.tagName) || '';
+    if (tn === 'INPUT' || tn === 'TEXTAREA' || tn === 'SELECT' || (t && t.isContentEditable)) return;
+    var back = document.querySelector('.cmdk-back'); if (back && back.classList.contains('on')) return;
+    if (e.key >= '1' && e.key <= '9') {
+      var v = NAV[(+e.key) - 1];
+      if (v === 'admin') { var na = document.getElementById('navAdmin'); if (!na || na.classList.contains('hidden')) return; }
+      if (v && typeof switchView === 'function') { switchView(v); }
+    }
+  });
+
+  function run() { injectExportView(); renderSaved(); }
+  run();
+  window.addEventListener('load', run);
+  setTimeout(run, 1000);
+})();
