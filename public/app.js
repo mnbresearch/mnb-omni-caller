@@ -1535,3 +1535,382 @@ async function detachNumber(numberId) {
     if (me.user && me.user.role === 'admin') { initBell(); studioDuplicateBtn(); }
   })();
 })();
+
+
+/* =======================================================================
+ * MNB Omni Caller - v6 platform layer (frontend)
+ * Live call monitoring + AI analytics, per-vertical intelligence, and the
+ * super-admin Integrations Control Center. Everything here is additive and
+ * guarded: non-admin dashboards are never impacted, and admin-only tools
+ * only appear for the super admin.
+ * ==================================================================== */
+(function () {
+  if (window.__mnbEnhanced6) return; window.__mnbEnhanced6 = true;
+  var API = function (p, o) { return api(p, o); };
+  var T = function (m, ms) { try { toast(m, ms); } catch (e) {} };
+  var E = function (s) { try { return esc(s); } catch (e) { return String(s == null ? '' : s); } };
+  var meV6 = null, VERT = {}, curVert = 'general';
+
+  /* ---------- styles ---------- */
+  var css = document.createElement('style'); css.id = 'mnb-v6-css';
+  css.textContent =
+    '.v6-grid{display:grid;gap:14px}' +
+    '.v6-kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}' +
+    '.v6-kpi{background:var(--card,#15161a);border:1px solid var(--line,#26272e);border-radius:14px;padding:16px}' +
+    '.v6-kpi .l{font-size:12px;color:var(--muted,#9aa0aa);letter-spacing:.3px;text-transform:uppercase}' +
+    '.v6-kpi .v{font-size:26px;font-weight:800;margin-top:6px;color:var(--text,#eef)}' +
+    '.v6-kpi .s{font-size:12px;color:var(--muted,#9aa0aa);margin-top:2px}' +
+    '.v6-badge{display:inline-block;font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;letter-spacing:.4px}' +
+    '.v6-pos{background:rgba(34,197,94,.16);color:#22c55e}.v6-neg{background:rgba(239,68,68,.16);color:#ef4444}.v6-neu{background:rgba(148,163,184,.16);color:#94a3b8}' +
+    '.v6-ai{background:linear-gradient(135deg,#ee6c0a,#ffab5e);color:#111}' +
+    '.v6-bar{height:9px;border-radius:6px;background:var(--line,#26272e);overflow:hidden}' +
+    '.v6-bar > i{display:block;height:100%;background:linear-gradient(90deg,#ee6c0a,#ffab5e)}' +
+    '.v6-live-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#ef4444;margin-right:7px;animation:v6pulse 1.2s infinite}' +
+    '@keyframes v6pulse{0%{box-shadow:0 0 0 0 rgba(239,68,68,.6)}70%{box-shadow:0 0 0 8px rgba(239,68,68,0)}100%{box-shadow:0 0 0 0 rgba(239,68,68,0)}}' +
+    '.v6-tx{max-height:340px;overflow:auto;display:flex;flex-direction:column;gap:8px;padding:4px 2px}' +
+    '.v6-turn{max-width:82%;padding:9px 13px;border-radius:14px;font-size:14px;line-height:1.4}' +
+    '.v6-turn.agent{align-self:flex-start;background:var(--line,#22232a);color:var(--text,#eef);border-bottom-left-radius:4px}' +
+    '.v6-turn.user{align-self:flex-end;background:linear-gradient(135deg,#ee6c0a,#ff9a4d);color:#111;border-bottom-right-radius:4px}' +
+    '.v6-who{font-size:10px;text-transform:uppercase;letter-spacing:.5px;opacity:.7;margin-bottom:2px}' +
+    '.v6-chip{display:inline-block;background:var(--line,#22232a);border:1px solid var(--line,#2b2c34);color:var(--text,#dfe3ea);border-radius:20px;padding:6px 12px;font-size:13px;margin:4px 6px 0 0;cursor:pointer}' +
+    '.v6-chip.on{background:linear-gradient(135deg,#ee6c0a,#ffab5e);color:#111;border-color:transparent;font-weight:700}' +
+    '.v6-int{border:1px solid var(--line,#26272e);border-radius:14px;padding:16px;margin-bottom:14px;background:var(--card,#15161a)}' +
+    '.v6-int h4{margin:0 0 3px;font-size:16px}.v6-int .tier{font-size:12px;color:#22c55e;font-weight:600}' +
+    '.v6-int .setup{font-size:12.5px;color:var(--muted,#9aa0aa);margin:8px 0 12px;line-height:1.5}' +
+    '.v6-field{display:flex;flex-direction:column;gap:4px;margin:8px 0}' +
+    '.v6-field label{font-size:12px;color:var(--muted,#9aa0aa)}' +
+    '.v6-field input{background:var(--bg,#0e0f12);border:1px solid var(--line,#2b2c34);color:var(--text,#eef);border-radius:9px;padding:9px 11px;font-size:13px;width:100%;box-sizing:border-box}' +
+    '.v6-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}' +
+    '.v6-tog{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--text,#dfe3ea)}' +
+    '.v6-list{display:flex;flex-direction:column;gap:8px}' +
+    '.v6-lc{display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid var(--line,#26272e);border-radius:12px;padding:11px 13px;background:var(--card,#15161a);cursor:pointer}' +
+    '.v6-lc:hover{border-color:#ee6c0a}' +
+    '.v6-muted{color:var(--muted,#9aa0aa)}.v6-mt{margin-top:16px}';
+  document.head.appendChild(css);
+
+  /* ---------- helpers ---------- */
+  function sentBadge(s) {
+    s = (s || 'neutral').toLowerCase();
+    var c = s === 'positive' ? 'v6-pos' : s === 'negative' ? 'v6-neg' : 'v6-neu';
+    return '<span class="v6-badge ' + c + '">' + E(s) + '</span>';
+  }
+  function pct(n) { return Math.max(0, Math.min(100, Math.round(n || 0))); }
+
+  // Lightweight client-side read of a transcript for the instant live panel.
+  function quickRead(turnsArr) {
+    var txt = turnsArr.map(function (t) { return t.text; }).join(' ').toLowerCase();
+    var pos = ['yes', 'sure', 'great', 'perfect', 'interested', 'book', 'sounds good', 'definitely', 'useful', 'works', 'help'];
+    var neg = ['no', 'not interested', 'do not call', 'busy', 'stop', 'complaint', 'refund'];
+    var p = pos.filter(function (w) { return txt.indexOf(w) >= 0; }).length;
+    var n = neg.filter(function (w) { return txt.indexOf(w) >= 0; }).length;
+    var sentiment = n > p ? 'negative' : p > 0 ? 'positive' : 'neutral';
+    var intent = /book|schedule|appointment|demo|site visit/.test(txt) ? 'booking' :
+      /price|pricing|cost|fee/.test(txt) ? 'pricing enquiry' :
+      /callback|call me|next week/.test(txt) ? 'callback' : 'in discovery';
+    var a = turnsArr.filter(function (t) { return t.who === 'agent'; }).length;
+    var u = turnsArr.filter(function (t) { return t.who === 'user'; }).length;
+    var talk = a + u ? Math.round(a / (a + u) * 100) : 0;
+    return { sentiment: sentiment, intent: intent, talk: talk };
+  }
+  function renderTurns(turnsArr) {
+    if (!turnsArr || !turnsArr.length) return '<div class="v6-muted">Waiting for the conversation to start...</div>';
+    return turnsArr.map(function (t) {
+      return '<div class="v6-turn ' + (t.who === 'user' ? 'user' : 'agent') + '">' +
+        '<div class="v6-who">' + (t.who === 'user' ? 'Customer' : 'AI Agent') + '</div>' + E(t.text) + '</div>';
+    }).join('');
+  }
+
+  /* ---------- view scaffolding ---------- */
+  function mkView(id) {
+    var main = document.querySelector('main.main') || (document.getElementById('view-overview') || {}).parentNode;
+    if (!main) return null;
+    var sec = document.createElement('section');
+    sec.id = 'view-' + id; sec.className = 'view hidden';
+    main.appendChild(sec);
+    return sec;
+  }
+  function mkNav(id, ico, label, adminOnly) {
+    var nav = document.querySelector('.sidebar nav') || document.querySelector('nav');
+    if (!nav) return;
+    if (document.querySelector('.nav-item[data-view="' + id + '"]')) return;
+    var a = document.createElement('a');
+    a.href = '#' + id; a.className = 'nav-item' + (adminOnly ? ' hidden' : '');
+    a.setAttribute('data-view', id);
+    if (adminOnly) a.id = 'navV6' + id;
+    a.innerHTML = '<span class="ico">' + ico + '</span> ' + label;
+    // place admin item near the end, others before Plan
+    var anchor = document.querySelector('.nav-item[data-view="' + (adminOnly ? 'admin' : 'plan') + '"]');
+    if (anchor && anchor.parentNode === nav) nav.insertBefore(a, anchor); else nav.appendChild(a);
+    a.addEventListener('click', function (e) { e.preventDefault(); window.switchView(id); });
+  }
+
+  var vLive = mkView('live'), vAna = mkView('analytics'), vInt = mkView('integrations');
+  mkNav('live', '&#9673;', 'Live Calls', false);
+  mkNav('analytics', '&#9636;', 'Call Analytics', false);
+  mkNav('integrations', '&#9881;', 'Integrations', true);
+
+  /* ---------- route override ---------- */
+  var MY = { live: loadLive, analytics: loadAnalytics, integrations: loadIntegrations };
+  var origSwitch = window.switchView;
+  window.switchView = function (view) {
+    if (MY[view]) {
+      document.querySelectorAll('.view').forEach(function (v) { v.classList.add('hidden'); });
+      var el = document.getElementById('view-' + view); if (el) el.classList.remove('hidden');
+      document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.toggle('active', n.getAttribute('data-view') === view); });
+      if (location.hash.replace('#', '') !== view) location.hash = view;
+      stopLivePoll(); if (view === 'live') startLivePoll();
+      try { MY[view](); } catch (e) { console.error(e); }
+      return;
+    }
+    stopLivePoll();
+    return origSwitch.apply(this, arguments);
+  };
+
+  /* ---------- fetch role + verticals, reveal admin nav ---------- */
+  (async function boot() {
+    try { var info = await API('/me'); meV6 = info && info.user; } catch (e) {}
+    if (meV6 && meV6.role === 'admin') { var ni = document.getElementById('navV6integrations'); if (ni) ni.classList.remove('hidden'); }
+    try { var vd = await API('/verticals'); VERT = vd.verticals || {}; curVert = (meV6 && meV6.businessType) || vd.current || 'general'; } catch (e) {}
+    // deep link support if we loaded straight into one of our views
+    var h = location.hash.replace('#', '');
+    if (MY[h]) window.switchView(h);
+  })();
+
+  /* ================= LIVE CALLS ================= */
+  var livePoll = null, liveSel = null;
+  function stopLivePoll() { if (livePoll) { clearInterval(livePoll); livePoll = null; } }
+  function startLivePoll() { stopLivePoll(); pollLive(); livePoll = setInterval(pollLive, 4000); }
+  async function pollLive() {
+    var host = document.getElementById('view-live'); if (!host || host.classList.contains('hidden')) { stopLivePoll(); return; }
+    var data; try { data = await API('/calls/live'); } catch (e) { return; }
+    renderLive(data.live || []);
+  }
+  function loadLive() {
+    vLive.innerHTML =
+      '<header class="view-head"><h2><span class="v6-live-dot"></span>Live Calls</h2>' +
+      '<p class="muted">Watch calls as they happen with a rolling transcript and real-time AI read-out. Auto-refreshes every few seconds.</p></header>' +
+      '<div id="v6LiveWrap"><div class="v6-muted">Checking for live calls...</div></div>';
+    pollLive();
+  }
+  function renderLive(list) {
+    var wrap = document.getElementById('v6LiveWrap'); if (!wrap) return;
+    if (!list.length) {
+      wrap.innerHTML = '<div class="card"><h3>No calls in progress right now</h3>' +
+        '<p class="muted">When your agents are on a call, they will appear here live with transcript and AI analysis. Start a call from <b>Place a Call</b> or run a campaign to see this light up.</p></div>';
+      return;
+    }
+    if (!liveSel || !list.some(function (c) { return c.id === liveSel; })) liveSel = list[0].id;
+    var sel = list.filter(function (c) { return c.id === liveSel; })[0] || list[0];
+    var read = quickRead(sel.transcript || []);
+    var tabs = list.map(function (c) {
+      return '<span class="v6-chip ' + (c.id === liveSel ? 'on' : '') + '" data-live="' + c.id + '">' +
+        '<span class="v6-live-dot"></span>' + E(c.to_number || ('Call ' + c.id)) + '</span>';
+    }).join('');
+    wrap.innerHTML =
+      '<div style="margin-bottom:10px">' + tabs + '</div>' +
+      '<div class="v6-grid" style="grid-template-columns:1.4fr 1fr">' +
+        '<div class="card"><h3 style="margin-top:0">' + E(sel.bot_name || 'AI Agent') + ' &rarr; ' + E(sel.to_number || '') + '</h3>' +
+          '<div class="v6-tx" id="v6Tx">' + renderTurns(sel.transcript) + '</div></div>' +
+        '<div class="card"><h3 style="margin-top:0">Live AI read-out</h3>' +
+          '<div class="v6-row"><span class="v6-muted">Sentiment</span> ' + sentBadge(read.sentiment) + '</div>' +
+          '<div class="v6-row"><span class="v6-muted">Intent</span> <b>' + E(read.intent) + '</b></div>' +
+          '<div class="v6-mt"><div class="v6-muted" style="font-size:12px">Agent talk-ratio ' + read.talk + '%</div><div class="v6-bar"><i style="width:' + read.talk + '%"></i></div></div>' +
+          '<div class="v6-mt"><button class="btn" id="v6AnalyzeBtn" data-id="' + sel.id + '">Deep AI analysis</button></div>' +
+          '<div id="v6AnaOut" class="v6-mt"></div>' +
+        '</div>' +
+      '</div>';
+    var tx = document.getElementById('v6Tx'); if (tx) tx.scrollTop = tx.scrollHeight;
+    wrap.querySelectorAll('[data-live]').forEach(function (el) {
+      el.addEventListener('click', function () { liveSel = Number(el.getAttribute('data-live')); pollLive(); });
+    });
+    var ab = document.getElementById('v6AnalyzeBtn');
+    if (ab) ab.addEventListener('click', function () { runAnalysis(ab.getAttribute('data-id'), 'v6AnaOut'); });
+  }
+
+  /* ================= per-call AI analysis ================= */
+  async function runAnalysis(id, outId) {
+    var out = document.getElementById(outId); if (out) out.innerHTML = '<div class="v6-muted">Analyzing call with AI...</div>';
+    try {
+      var d = await API('/analytics/call/' + id);
+      var a = d.analysis || {};
+      var fields = a.fields && Object.keys(a.fields).length
+        ? '<div class="v6-mt"><div class="v6-muted" style="font-size:12px;text-transform:uppercase;letter-spacing:.4px">Captured details</div>' +
+          Object.keys(a.fields).map(function (k) { return '<div><b>' + E(k.replace(/_/g, ' ')) + ':</b> ' + E(a.fields[k]) + '</div>'; }).join('') + '</div>'
+        : '';
+      var coach = (a.coaching || []).map(function (c) { return '<li>' + E(c) + '</li>'; }).join('');
+      if (out) out.innerHTML =
+        '<div class="v6-int" style="margin:0">' +
+          '<div class="v6-row"><span class="v6-badge ' + (a.engine === 'ai' ? 'v6-ai' : 'v6-neu') + '">' + (a.engine === 'ai' ? 'AI engine' : 'built-in engine') + '</span> ' +
+            sentBadge(a.sentiment) + ' <span class="v6-badge v6-neu">score ' + pct(a.score) + '</span></div>' +
+          '<p style="margin:10px 0 6px">' + E(a.summary || '') + '</p>' +
+          '<div class="v6-muted" style="font-size:13px">Intent: <b>' + E(a.intent || '') + '</b> &middot; Outcome: <b>' + E((a.outcome || '').replace(/_/g, ' ')) + '</b></div>' +
+          fields +
+          (coach ? '<div class="v6-mt"><div class="v6-muted" style="font-size:12px;text-transform:uppercase;letter-spacing:.4px">Coaching</div><ul style="margin:6px 0 0;padding-left:18px">' + coach + '</ul></div>' : '') +
+        '</div>';
+    } catch (e) { if (out) out.innerHTML = '<div class="v6-neg">Analysis failed: ' + E(e.message) + '</div>'; }
+  }
+
+  /* ================= CALL ANALYTICS ================= */
+  async function loadAnalytics() {
+    vAna.innerHTML = '<header class="view-head"><h2>Call Analytics</h2><p class="muted">Loading intelligence across your calls...</p></header>';
+    var o; try { o = await API('/analytics/overview'); } catch (e) { vAna.innerHTML = '<div class="card v6-neg">Could not load analytics: ' + E(e.message) + '</div>'; return; }
+    var sent = o.sentiment || {}; var totSent = (sent.positive || 0) + (sent.neutral || 0) + (sent.negative || 0) || 1;
+    var engine = o.aiEngine === 'groq' ? 'Groq AI' : o.aiEngine === 'gemini' ? 'Gemini AI' : 'Built-in engine (free)';
+    var kpiCards =
+      kpi('Avg call score', pct(o.avgScore), 'out of 100') +
+      kpi('Conversion', o.conversion + '%', o.booked + ' of ' + (o.totals ? o.totals.calls : 0) + ' calls') +
+      kpi('Connected', (o.totals ? o.totals.connected : 0), 'of ' + (o.totals ? o.totals.calls : 0) + ' dialled') +
+      kpi('Agent talk-ratio', pct(o.avgTalkRatio) + '%', 'lower = more listening');
+    var outcomes = (o.outcomes || []).map(function (x) {
+      return '<div class="v6-row" style="justify-content:space-between"><span>' + E(x[0].replace(/_/g, ' ')) + '</span><b>' + x[1] + '</b></div>';
+    }).join('') || '<div class="v6-muted">No outcomes yet</div>';
+    var intents = (o.topIntents || []).map(function (x) { return '<span class="v6-chip">' + E(x[0]) + ' &middot; ' + x[1] + '</span>'; }).join('') || '<span class="v6-muted">No data yet</span>';
+    var sbar = function (label, n, cls) {
+      var w = Math.round(n / totSent * 100);
+      return '<div class="v6-mt"><div class="v6-row" style="justify-content:space-between"><span>' + label + '</span><span class="v6-muted">' + n + '</span></div><div class="v6-bar"><i style="width:' + w + '%' + (cls ? ';background:' + cls : '') + '"></i></div></div>';
+    };
+    var kpiName = (o.vertical && o.vertical.kpis) ? o.vertical.kpis.map(function (k) { return '<span class="v6-chip">' + E(k.label) + '</span>'; }).join('') : '';
+    vAna.innerHTML =
+      '<header class="view-head"><h2>Call Analytics</h2>' +
+      '<p class="muted">' + E((o.vertical && o.vertical.name) || 'General') + ' &middot; analysis engine: <b>' + engine + '</b></p></header>' +
+      '<div id="v6VertPick"></div>' +
+      '<div class="v6-grid v6-kpis v6-mt">' + kpiCards + '</div>' +
+      '<div class="v6-grid v6-mt" style="grid-template-columns:1fr 1fr">' +
+        '<div class="card"><h3 style="margin-top:0">Sentiment mix</h3>' +
+          sbar('Positive', sent.positive || 0, '#22c55e') + sbar('Neutral', sent.neutral || 0, '#94a3b8') + sbar('Negative', sent.negative || 0, '#ef4444') +
+        '</div>' +
+        '<div class="card"><h3 style="margin-top:0">Outcomes</h3>' + outcomes +
+          '<div class="v6-mt"><div class="v6-muted" style="font-size:12px;text-transform:uppercase;letter-spacing:.4px">Top intents</div><div style="margin-top:6px">' + intents + '</div></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="card v6-mt"><h3 style="margin-top:0">Vertical KPIs tracked for you</h3><div>' + (kpiName || '<span class="v6-muted">Pick a business type to tailor KPIs</span>') + '</div></div>' +
+      '<div class="card v6-mt"><h3 style="margin-top:0">Recent calls &middot; tap for AI analysis</h3><div id="v6Recent" class="v6-list"><div class="v6-muted">Loading...</div></div></div>';
+    renderVertPicker();
+    loadRecentForAnalysis();
+  }
+  function kpi(l, v, s) { return '<div class="v6-kpi"><div class="l">' + l + '</div><div class="v">' + v + '</div><div class="s">' + (s || '') + '</div></div>'; }
+
+  function renderVertPicker() {
+    var host = document.getElementById('v6VertPick'); if (!host) return;
+    if (meV6 && meV6.demo) { host.innerHTML = '<div class="card"><b>Business type:</b> read-only in demo. Real accounts pick their vertical to auto-tailor captured fields, KPIs and AI analysis.</div>'; return; }
+    var ids = Object.keys(VERT);
+    var chips = ids.map(function (id) {
+      return '<span class="v6-chip ' + (id === curVert ? 'on' : '') + '" data-vert="' + id + '">' + E(VERT[id].name) + '</span>';
+    }).join('');
+    host.innerHTML = '<div class="card"><h3 style="margin-top:0">Your business type</h3>' +
+      '<p class="muted" style="margin:0 0 8px">Sets the custom details each call captures, the KPIs you track, and how the AI scores calls.</p>' + chips + '</div>';
+    host.querySelectorAll('[data-vert]').forEach(function (el) {
+      el.addEventListener('click', async function () {
+        var id = el.getAttribute('data-vert');
+        try { await API('/my/vertical', { method: 'POST', body: { businessType: id } }); curVert = id; T('Business type set to ' + VERT[id].name); loadAnalytics(); }
+        catch (e) { T('Could not update: ' + e.message, 4000); }
+      });
+    });
+  }
+  async function loadRecentForAnalysis() {
+    var host = document.getElementById('v6Recent'); if (!host) return;
+    var rows = [];
+    try { var d = await API('/calls/logs?pageno=1&pagesize=12'); rows = d.call_log_data || []; } catch (e) {}
+    rows = rows.filter(function (r) { return (r.call_conversation || r.transcript || '').length > 12; });
+    if (!rows.length) { host.innerHTML = '<div class="v6-muted">No completed calls with transcripts yet.</div>'; return; }
+    host.innerHTML = rows.map(function (r) {
+      return '<div class="v6-lc" data-cid="' + r.id + '"><div><b>' + E(r.to_number || ('Call ' + r.id)) + '</b> <span class="v6-muted">&middot; ' + E(r.call_duration || '') + '</span><div class="v6-muted" style="font-size:12px">' + E(r.time_of_call || '') + '</div></div>' +
+        sentBadge(r.sentiment_score || 'neutral') + '</div>' +
+        '<div id="v6ana_' + r.id + '"></div>';
+    }).join('');
+    host.querySelectorAll('.v6-lc').forEach(function (el) {
+      el.addEventListener('click', function () { runAnalysis(el.getAttribute('data-cid'), 'v6ana_' + el.getAttribute('data-cid')); });
+    });
+  }
+
+  /* ================= INTEGRATIONS (super-admin only) ================= */
+  async function loadIntegrations() {
+    if (!meV6 || meV6.role !== 'admin') { vInt.innerHTML = '<div class="card">This area is for the platform administrator.</div>'; return; }
+    vInt.innerHTML = '<header class="view-head"><h2>Integrations Control Center</h2><p class="muted">Loading...</p></header>';
+    var d; try { d = await API('/admin/integrations'); } catch (e) { vInt.innerHTML = '<div class="card v6-neg">Could not load: ' + E(e.message) + '</div>'; return; }
+    var cfg = d.config || {}, cat = d.catalog || [], env = d.env || {};
+    var fieldsFor = {
+      ai: [{ k: 'provider', l: 'Provider (groq or gemini)', ph: 'groq' }, { k: 'groqKey', l: 'Groq API key', ph: 'gsk_...' }, { k: 'geminiKey', l: 'Gemini API key', ph: 'AIza...' }, { k: 'model', l: 'Model (optional)', ph: 'llama-3.3-70b-versatile' }],
+      whatsapp: [{ k: 'token', l: 'Permanent token', ph: 'EAAG...' }, { k: 'phoneId', l: 'Phone number ID', ph: '1234567890' }],
+      razorpay: [{ k: 'keyId', l: 'Key ID', ph: 'rzp_test_...' }, { k: 'keySecret', l: 'Key secret', ph: '...' }],
+      sheets: [{ k: 'webhookUrl', l: 'Apps Script Web App URL', ph: 'https://script.google.com/macros/s/.../exec' }],
+      calendar: [{ k: 'webhookUrl', l: 'Apps Script / Cal.com URL', ph: 'https://...' }],
+      webhook: [{ k: 'url', l: 'Webhook URL (Zapier/Make/any)', ph: 'https://hooks.zapier.com/...' }],
+      slack: [{ k: 'webhookUrl', l: 'Slack/Discord incoming webhook', ph: 'https://hooks.slack.com/services/...' }],
+    };
+    var cards = cat.map(function (item) {
+      var c = cfg[item.key] || {}; var fs = fieldsFor[item.key] || [];
+      var inputs = fs.map(function (f) {
+        var val = c[f.k] != null ? c[f.k] : '';
+        return '<div class="v6-field"><label>' + E(f.l) + '</label><input data-sec="' + item.key + '" data-k="' + f.k + '" value="' + E(val) + '" placeholder="' + E(f.ph) + '"></div>';
+      }).join('');
+      var extraTog = item.key === 'whatsapp' ? '<label class="v6-tog"><input type="checkbox" data-sec="whatsapp" data-k="welcomeLeads" ' + (c.welcomeLeads ? 'checked' : '') + '> Auto-WhatsApp new leads</label>' : '';
+      return '<div class="v6-int">' +
+        '<div class="v6-row" style="justify-content:space-between"><h4>' + E(item.name) + '</h4>' +
+          '<label class="v6-tog"><input type="checkbox" data-sec="' + item.key + '" data-k="enabled" ' + (c.enabled ? 'checked' : '') + '> Enabled</label></div>' +
+        '<div class="tier">Free: ' + E(item.tier) + '</div>' +
+        '<div class="setup">' + E(item.setup) + '</div>' + inputs + extraTog +
+        '<div class="v6-row"><button class="btn" data-save="' + item.key + '">Save</button>' +
+          '<button class="btn" data-test="' + item.key + '" style="background:transparent;border:1px solid var(--line,#2b2c34)">Test</button>' +
+          '<span class="v6-muted" id="v6ires_' + item.key + '"></span></div>' +
+      '</div>';
+    }).join('');
+    var envNote = Object.keys(env).filter(function (k) { return env[k]; }).map(function (k) { return k; });
+    vInt.innerHTML =
+      '<header class="view-head"><h2>Integrations Control Center</h2>' +
+      '<p class="muted">Only you (the platform admin) can see and set these. Keys are stored server-side and never sent to client dashboards. Everything below has a free or generous-free tier.</p></header>' +
+      (envNote.length ? '<div class="card v6-mt"><b>From environment:</b> <span class="v6-muted">' + envNote.join(', ') + ' detected. Admin values below override env if set.</span></div>' : '') +
+      '<div class="v6-mt">' + cards + '</div>' +
+      '<div class="card v6-mt"><h3 style="margin-top:0">Assign business type to organizations</h3><div id="v6Orgs" class="v6-list"><div class="v6-muted">Loading orgs...</div></div></div>';
+    bindIntegrations();
+    loadOrgVerticals();
+  }
+  function collect(sec) {
+    var body = {};
+    document.querySelectorAll('[data-sec="' + sec + '"]').forEach(function (el) {
+      var k = el.getAttribute('data-k');
+      body[k] = el.type === 'checkbox' ? el.checked : el.value.trim();
+    });
+    return body;
+  }
+  function bindIntegrations() {
+    vInt.querySelectorAll('[data-save]').forEach(function (b) {
+      b.addEventListener('click', async function () {
+        var sec = b.getAttribute('data-save');
+        try { await API('/admin/integrations', { method: 'POST', body: { section: sec, values: collect(sec) } }); T('Saved ' + sec); }
+        catch (e) { T('Save failed: ' + e.message, 4000); }
+      });
+    });
+    vInt.querySelectorAll('[data-test]').forEach(function (b) {
+      b.addEventListener('click', async function () {
+        var sec = b.getAttribute('data-test'); var out = document.getElementById('v6ires_' + sec);
+        if (out) out.textContent = 'Testing...';
+        // save first so the test uses fresh values
+        try { await API('/admin/integrations', { method: 'POST', body: { section: sec, values: collect(sec) } }); } catch (e) {}
+        var to = '';
+        if (sec === 'whatsapp') { to = prompt('Send WhatsApp test to (number with country code):', meV6.phone || ''); if (!to) { if (out) out.textContent = ''; return; } }
+        try { var r = await API('/admin/integrations/test/' + sec, { method: 'POST', body: { to: to } });
+          if (out) out.innerHTML = r.ok ? '<span class="v6-pos">OK</span> ' + E(r.sample || r.provider || '') : (r.skipped ? 'Not configured yet' : '<span class="v6-neg">Failed: ' + E(r.error || '') + '</span>');
+        } catch (e) { if (out) out.innerHTML = '<span class="v6-neg">' + E(e.message) + '</span>'; }
+      });
+    });
+  }
+  async function loadOrgVerticals() {
+    var host = document.getElementById('v6Orgs'); if (!host) return;
+    var users = [];
+    try { var d = await API('/admin/users'); users = (d.users || []).filter(function (u) { return u.role !== 'admin'; }); } catch (e) {}
+    if (!users.length) { host.innerHTML = '<div class="v6-muted">No client organizations yet.</div>'; return; }
+    var opts = Object.keys(VERT);
+    host.innerHTML = users.map(function (u) {
+      var sel = opts.map(function (id) { return '<option value="' + id + '"' + ((u.businessType || 'general') === id ? ' selected' : '') + '>' + E(VERT[id].name) + '</option>'; }).join('');
+      return '<div class="v6-lc" style="cursor:default"><div><b>' + E(u.org || u.email) + '</b><div class="v6-muted" style="font-size:12px">' + E(u.email) + '</div></div>' +
+        '<select data-org="' + u.id + '" style="background:var(--bg,#0e0f12);color:var(--text,#eef);border:1px solid var(--line,#2b2c34);border-radius:8px;padding:7px 9px">' + sel + '</select></div>';
+    }).join('');
+    host.querySelectorAll('[data-org]').forEach(function (s) {
+      s.addEventListener('change', async function () {
+        try { await API('/admin/org/' + s.getAttribute('data-org') + '/vertical', { method: 'POST', body: { businessType: s.value } }); T('Updated'); }
+        catch (e) { T('Failed: ' + e.message, 4000); }
+      });
+    });
+  }
+})();
