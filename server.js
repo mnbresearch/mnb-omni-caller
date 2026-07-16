@@ -1,5 +1,5 @@
 /**
- * MNB Omni Caller — multi-tenant Voice AI platform by MNB Research.
+ * MNB Omni Caller \u2014 multi-tenant Voice AI platform by MNB Research.
  * Admin trains agents and delegates them to client organizations.
  * Clients see only their own agents, calls, numbers, and documents.
  * The OmniDim API key lives only on this server.
@@ -145,7 +145,7 @@ function sendAccessRequestEmails(u) {
       ${btn('mailto:' + eesc(u.email), 'Reply to ' + eesc(firstName))}
       ${waDigits ? '&nbsp;&nbsp;<a href="https://wa.me/' + waDigits + '" style="display:inline-block;border:1px solid #25D366;color:#128C4B;font-weight:700;font-size:14px;text-decoration:none;padding:11px 22px;border-radius:8px">WhatsApp</a>' : ''}
     </div>`;
-  resendSend({ to: MAIL_ADMIN, subject: `New access request — ${APP_NAME}: ${u.contact || u.org || u.email}`, html: accessEmailShell(adminInner) });
+  resendSend({ to: MAIL_ADMIN, subject: `New access request \u2014 ${APP_NAME}: ${u.contact || u.org || u.email}`, html: accessEmailShell(adminInner) });
 
   // 2) Requester confirmation
   const step = (n, t) => `<tr><td style="vertical-align:top;padding:5px 12px 5px 0"><div style="width:24px;height:24px;border-radius:50%;background:${OR_GRAD};color:#111;font-weight:800;font-size:12px;text-align:center;line-height:24px">${n}</div></td><td style="vertical-align:middle;font-size:14px;color:#3a3a3a;padding:5px 0">${t}</td></tr>`;
@@ -163,7 +163,7 @@ function sendAccessRequestEmails(u) {
     <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.65">While you wait, explore the platform live:</p>
     <div>${btn(eesc(DEMO_URL), '&#9654; View the live demo')}</div>
     <p style="margin:26px 0 0;font-size:14px;color:#3a3a3a">Warm regards,<br/><b>The MNB Research team</b></p>`;
-  resendSend({ to: u.email, subject: 'We received your access request — MNB Omni Caller', html: accessEmailShell(reqInner) });
+  resendSend({ to: u.email, subject: 'We received your access request \u2014 MNB Omni Caller', html: accessEmailShell(reqInner) });
 }
 
 app.post('/api/auth/signup', (req, res) => {
@@ -174,6 +174,7 @@ app.post('/api/auth/signup', (req, res) => {
   const user = db.createUser({ email, password, org, contact, phone, note });
   notifyNewLead(user);            // fire-and-forget push alert (ntfy)
   sendAccessRequestEmails(user);  // fire-and-forget Resend emails (admin + requester)
+  onNewLead(user);                // fire-and-forget integration fan-out (Sheets/webhook/Slack/WhatsApp)
   res.json({ ok: true, message: 'Thanks! Your request is in. MNB Research will reach out and approve your access shortly.' });
 });
 
@@ -196,7 +197,7 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ ok: true });
 });
 
-// One-click read-only demo login (no password) — powers "View live demo".
+// One-click read-only demo login (no password) \u2014 powers "View live demo".
 app.post('/api/auth/demo', (req, res) => {
   const u = db.getDemoUser();
   if (!u) return res.status(503).json({ error: 'Demo is warming up, please try again in a moment.' });
@@ -217,6 +218,7 @@ app.get('/api/me', async (req, res) => {
       email: user.email, org: user.org, role: user.role, demo: !!user.demo,
       minuteCap: user.minuteCap, usedMinutes: usage,
       agentIds: user.agentIds || [], numberIds: user.numberIds || [],
+      businessType: user.businessType || 'general',
     },
   });
 });
@@ -235,6 +237,9 @@ app.use('/api', (req, res, next) => {
   if (!req.user || !req.user.demo) return next();
   if (req.method !== 'GET') return res.status(403).json({ error: DEMO_WRITE_MSG });
   const p = req.path;
+  // v6 read endpoints serve their own demo sample data -> let them through
+  if (p === '/verticals' || p === '/analytics/overview' || p === '/calls/live' ||
+      p.startsWith('/analytics/call/') || p.endsWith('/transcript')) return next();
   if (p === '/agents') return res.json({ bots: [demo.agent], total_records: 1 });
   if (p.startsWith('/agents/')) return res.json(demo.agent);
   if (p === '/calls/logs') return res.json(demo.pagedLogs(Number(req.query.pageno) || 1, Number(req.query.pagesize) || 20, req.query.call_status || ''));
@@ -312,7 +317,7 @@ async function getUsageMinutes(user) {
 app.get('/api/admin/users', adminOnly, async (req, res) => {
   const users = await Promise.all(db.listUsers().filter((u) => !u.demo).map(async (u) => ({
     id: u.id, email: u.email, org: u.org, role: u.role, status: u.status,
-    contact: u.contact || '', phone: u.phone || '', note: u.note || '',
+    contact: u.contact || '', phone: u.phone || '', note: u.note || '', businessType: u.businessType || 'general',
     agentIds: u.agentIds, numberIds: u.numberIds, minuteCap: u.minuteCap, createdAt: u.createdAt,
     usedMinutes: u.role === 'client' && u.status === 'active' ? await getUsageMinutes(u).catch(() => null) : null,
   })));
@@ -519,6 +524,526 @@ app.post('/api/numbers/attach', adminOnly, relay('POST', '/phone_number/attach')
 app.post('/api/numbers/detach', adminOnly, relay('POST', '/phone_number/detach'));
 app.get('/api/voices', relay('GET', '/providers/voices', { passQuery: true }));
 app.get('/api/llms', relay('GET', '/providers/llms'));
+
+/* ========================================================================
+ * v6 PLATFORM LAYER
+ * Business verticals, live-call AI analytics, and the India-first
+ * integrations layer. Every secret lives ONLY on this server. Non-admin
+ * clients never receive any key. Analytics works even with zero keys
+ * configured (built-in heuristic engine) and upgrades automatically to a
+ * free-tier LLM (Groq / Google Gemini) the moment a key is set.
+ * ===================================================================== */
+
+/* ---------------- Business verticals (India-first templates) ---------- */
+const VERTICALS = {
+  general: {
+    id: 'general', name: 'General Business', icon: 'briefcase',
+    goal: 'qualify the lead and book a follow-up',
+    fields: [
+      { key: 'interest', label: 'Primary interest', type: 'text' },
+      { key: 'budget', label: 'Budget (INR)', type: 'number' },
+      { key: 'timeline', label: 'Timeline', type: 'text' },
+      { key: 'followup', label: 'Follow-up booked?', type: 'bool' },
+    ],
+    kpis: [
+      { key: 'conversion', label: 'Conversion rate' },
+      { key: 'followups', label: 'Follow-ups booked' },
+      { key: 'avg_score', label: 'Avg call score' },
+    ],
+    outcomes: ['interested', 'not_interested', 'callback', 'booked', 'complaint'],
+  },
+  restaurant: {
+    id: 'restaurant', name: 'Restaurant & Cafe', icon: 'utensils',
+    goal: 'take a reservation or an order and capture guest details',
+    fields: [
+      { key: 'party_size', label: 'Party size', type: 'number' },
+      { key: 'reservation_time', label: 'Reservation date/time', type: 'text' },
+      { key: 'order_value', label: 'Order value (INR)', type: 'number' },
+      { key: 'occasion', label: 'Occasion', type: 'text' },
+      { key: 'special_requests', label: 'Special requests', type: 'text' },
+    ],
+    kpis: [
+      { key: 'reservations', label: 'Reservations' },
+      { key: 'avg_order_value', label: 'Avg order value' },
+      { key: 'no_show_rate', label: 'No-show rate' },
+      { key: 'repeat_guests', label: 'Repeat guests' },
+    ],
+    outcomes: ['reservation_booked', 'order_placed', 'enquiry', 'no_availability', 'complaint'],
+  },
+  clinic: {
+    id: 'clinic', name: 'Clinic & Hospital', icon: 'stethoscope',
+    goal: 'book or reschedule an appointment and triage urgency',
+    fields: [
+      { key: 'appointment_time', label: 'Appointment date/time', type: 'text' },
+      { key: 'department', label: 'Department / specialty', type: 'text' },
+      { key: 'patient_type', label: 'New or returning patient', type: 'text' },
+      { key: 'urgency', label: 'Urgency', type: 'text' },
+      { key: 'insurance', label: 'Insurance / payment', type: 'text' },
+    ],
+    kpis: [
+      { key: 'appointments', label: 'Appointments booked' },
+      { key: 'reschedules', label: 'Reschedules' },
+      { key: 'no_show_rate', label: 'No-show rate' },
+      { key: 'urgent_flagged', label: 'Urgent cases flagged' },
+    ],
+    outcomes: ['appointment_booked', 'rescheduled', 'enquiry', 'urgent_referral', 'cancelled'],
+  },
+  realestate: {
+    id: 'realestate', name: 'Real Estate', icon: 'home',
+    goal: 'qualify the buyer/renter and book a site visit',
+    fields: [
+      { key: 'budget', label: 'Budget (INR)', type: 'number' },
+      { key: 'locality', label: 'Preferred locality', type: 'text' },
+      { key: 'config', label: 'Configuration (BHK)', type: 'text' },
+      { key: 'buy_or_rent', label: 'Buy or rent', type: 'text' },
+      { key: 'site_visit', label: 'Site visit booked?', type: 'bool' },
+    ],
+    kpis: [
+      { key: 'site_visits', label: 'Site visits booked' },
+      { key: 'hot_leads', label: 'Hot leads' },
+      { key: 'avg_budget', label: 'Avg budget' },
+      { key: 'conversion', label: 'Conversion rate' },
+    ],
+    outcomes: ['site_visit_booked', 'hot_lead', 'warm_lead', 'not_interested', 'callback'],
+  },
+  ecommerce: {
+    id: 'ecommerce', name: 'E-commerce / D2C', icon: 'shopping-cart',
+    goal: 'confirm the order, recover the cart or resolve the query',
+    fields: [
+      { key: 'order_id', label: 'Order ID', type: 'text' },
+      { key: 'cod_confirmed', label: 'COD confirmed?', type: 'bool' },
+      { key: 'issue_type', label: 'Issue type', type: 'text' },
+      { key: 'cart_value', label: 'Cart value (INR)', type: 'number' },
+      { key: 'resolution', label: 'Resolution', type: 'text' },
+    ],
+    kpis: [
+      { key: 'cod_confirmed', label: 'COD confirmed' },
+      { key: 'carts_recovered', label: 'Carts recovered' },
+      { key: 'returns', label: 'Returns handled' },
+      { key: 'csat', label: 'CSAT' },
+    ],
+    outcomes: ['confirmed', 'cart_recovered', 'return_initiated', 'resolved', 'escalated'],
+  },
+  education: {
+    id: 'education', name: 'Education & Coaching', icon: 'graduation-cap',
+    goal: 'capture course interest and book a counselling / demo session',
+    fields: [
+      { key: 'course', label: 'Course of interest', type: 'text' },
+      { key: 'stage', label: 'Admission stage', type: 'text' },
+      { key: 'demo_booked', label: 'Demo/counselling booked?', type: 'bool' },
+      { key: 'fee_query', label: 'Fee query', type: 'text' },
+      { key: 'city', label: 'City', type: 'text' },
+    ],
+    kpis: [
+      { key: 'demos_booked', label: 'Demos booked' },
+      { key: 'applications', label: 'Applications' },
+      { key: 'fee_queries', label: 'Fee queries' },
+      { key: 'conversion', label: 'Conversion rate' },
+    ],
+    outcomes: ['demo_booked', 'application_started', 'enquiry', 'not_interested', 'callback'],
+  },
+  lending: {
+    id: 'lending', name: 'Lending & Financial Services', icon: 'landmark',
+    goal: 'qualify eligibility and progress the loan / collection',
+    fields: [
+      { key: 'loan_type', label: 'Loan / product type', type: 'text' },
+      { key: 'ticket_size', label: 'Ticket size (INR)', type: 'number' },
+      { key: 'kyc_stage', label: 'KYC stage', type: 'text' },
+      { key: 'emi_status', label: 'EMI / collection status', type: 'text' },
+      { key: 'eligible', label: 'Eligible?', type: 'bool' },
+    ],
+    kpis: [
+      { key: 'qualified', label: 'Qualified leads' },
+      { key: 'kyc_done', label: 'KYC completed' },
+      { key: 'promise_to_pay', label: 'Promise-to-pay' },
+      { key: 'avg_ticket', label: 'Avg ticket size' },
+    ],
+    outcomes: ['qualified', 'kyc_pending', 'promise_to_pay', 'not_eligible', 'callback'],
+  },
+};
+function verticalOf(user) { return VERTICALS[(user && user.businessType) || 'general'] || VERTICALS.general; }
+
+/* ---------------- Integration config resolver (env OR admin-set) ------ */
+function integCfg() { const s = db.getSettings(); return s.integrations || (s.integrations = {}); }
+function cfg(section) { return integCfg()[section] || {}; }
+function saveIntegSection(section, values) {
+  const all = integCfg();
+  all[section] = Object.assign({}, all[section] || {}, values || {});
+  db.setSettings(Object.assign({}, db.getSettings(), { integrations: all }));
+  return all[section];
+}
+function pref(section, field, envName) {
+  const c = cfg(section);
+  if (c[field] !== undefined && c[field] !== '') return c[field];
+  return envName ? (process.env[envName] || '') : '';
+}
+const mask = (s) => { s = String(s || ''); return s ? '****' + s.slice(-4) : ''; };
+
+/* ---------------- Free-tier LLM (Groq primary, Gemini fallback) ------- */
+function aiProvider() {
+  const c = cfg('ai');
+  if (c.provider) return c.provider;
+  if (pref('ai', 'groqKey', 'GROQ_API_KEY')) return 'groq';
+  if (pref('ai', 'geminiKey', 'GEMINI_API_KEY')) return 'gemini';
+  return 'none';
+}
+async function callLLM(system, user) {
+  const provider = aiProvider();
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 14000);
+  try {
+    if (provider === 'groq') {
+      const key = pref('ai', 'groqKey', 'GROQ_API_KEY');
+      if (!key) return null;
+      const model = cfg('ai').model || 'llama-3.3-70b-versatile';
+      const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST', signal: ctrl.signal,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: JSON.stringify({
+          model, temperature: 0.2, response_format: { type: 'json_object' },
+          messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+        }),
+      });
+      if (!r.ok) return null;
+      const j = await r.json();
+      return j.choices && j.choices[0] && j.choices[0].message ? j.choices[0].message.content : null;
+    }
+    if (provider === 'gemini') {
+      const key = pref('ai', 'geminiKey', 'GEMINI_API_KEY');
+      if (!key) return null;
+      const model = cfg('ai').model || 'gemini-1.5-flash';
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
+        method: 'POST', signal: ctrl.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: system + '\n\n' + user }] }],
+          generationConfig: { temperature: 0.2, responseMimeType: 'application/json' },
+        }),
+      });
+      if (!r.ok) return null;
+      const j = await r.json();
+      return j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts
+        ? j.candidates[0].content.parts.map((p) => p.text).join('') : null;
+    }
+    return null;
+  } catch (e) { return null; } finally { clearTimeout(t); }
+}
+
+/* ---------------- Transcript parsing + heuristic analytics ------------ */
+function convToText(log) {
+  const raw = log.call_conversation || log.transcript || log.call_transcript || log.conversation || '';
+  return String(raw).replace(/<br\s*\/?>/gi, '\n').replace(/\s+\n/g, '\n').trim();
+}
+function turns(text) {
+  return text.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
+    const m = /^(LLM|assistant|agent|bot|user|customer|caller)\s*[:\-]\s*(.*)$/i.exec(l);
+    if (m) { const who = /user|customer|caller/i.test(m[1]) ? 'user' : 'agent'; return { who, text: m[2] }; }
+    return { who: 'agent', text: l };
+  });
+}
+const POS = ['yes', 'sure', 'great', 'perfect', 'interested', 'book', 'booked', 'sounds good', 'go for it', 'definitely', 'useful', 'relief', 'works'];
+const NEG = ['no', 'not interested', 'do not call', "don't call", 'busy', 'stop', 'remove', 'angry', 'refund', 'complaint', 'unhappy', 'never'];
+function heuristicAnalyze(log, vertical) {
+  const text = convToText(log);
+  const low = text.toLowerCase();
+  const ts = turns(text);
+  let sentiment = (log.sentiment_score || '').toLowerCase() || 'neutral';
+  if (!['positive', 'neutral', 'negative'].includes(sentiment)) {
+    const pos = POS.filter((w) => low.includes(w)).length;
+    const neg = NEG.filter((w) => low.includes(w)).length;
+    sentiment = neg > pos ? 'negative' : pos > 0 ? 'positive' : 'neutral';
+  }
+  let outcome = 'enquiry', intent = 'general enquiry';
+  if (/\b(book|booked|schedule|set up|site visit|appointment|demo)\b/.test(low)) { outcome = 'booked'; intent = 'booking'; }
+  else if (/\b(price|pricing|quote|cost|fee|email me)\b/.test(low)) { intent = 'pricing enquiry'; }
+  else if (/\b(call me|callback|next week|later)\b/.test(low)) { outcome = 'callback'; intent = 'callback requested'; }
+  else if (NEG.some((w) => low.includes(w))) { outcome = 'not_interested'; intent = 'not interested'; }
+  else if (sentiment === 'positive') { outcome = 'interested'; intent = 'interested'; }
+  const dur = parseDur(log.call_duration);
+  let score = 40;
+  if (sentiment === 'positive') score += 30; if (sentiment === 'negative') score -= 20;
+  if (outcome === 'booked') score += 25; if (outcome === 'callback') score += 8;
+  if (dur > 90) score += 10; if (dur > 0 && dur < 20) score -= 10;
+  if (log.call_status && log.call_status !== 'completed') score = Math.min(score, 25);
+  score = Math.max(0, Math.min(100, score));
+  const userTurns = ts.filter((t) => t.who === 'user').length;
+  const agentTurns = ts.filter((t) => t.who === 'agent').length;
+  const talkRatio = agentTurns + userTurns ? Math.round((agentTurns / (agentTurns + userTurns)) * 100) : 0;
+  const fields = {};
+  const money = low.match(/(?:rs\.?|inr|\u20B9)\s*([\d,]+)/i);
+  if (money) fields.budget = money[1].replace(/,/g, '');
+  const party = low.match(/\b(\d{1,2})\s*(?:people|pax|guests|persons?)\b/);
+  if (party) fields.party_size = party[1];
+  const coaching = [];
+  if (talkRatio > 70) coaching.push('Agent dominated the conversation - ask more open questions and let the customer talk.');
+  if (outcome === 'booked') coaching.push('Strong close. Confirm the details over WhatsApp/email to lock it in.');
+  if (intent === 'pricing enquiry') coaching.push('Pricing interest detected - send the price sheet immediately while intent is warm.');
+  if (sentiment === 'negative') coaching.push('Negative sentiment - suppress from re-dial list and log a do-not-call note.');
+  if (!coaching.length) coaching.push('Solid call. A quick follow-up message will keep momentum.');
+  const summary = log.sentiment_analysis_details || (ts.find((t) => t.who === 'user') ? 'Customer: ' + ts.find((t) => t.who === 'user').text : 'Call completed.');
+  return { engine: 'heuristic', summary, sentiment, intent, outcome, score, talkRatio, fields, coaching };
+}
+async function analyzeCall(log, vertical) {
+  const text = convToText(log);
+  if (!text || text.length < 12) return heuristicAnalyze(log, vertical);
+  if (aiProvider() === 'none') return heuristicAnalyze(log, vertical);
+  const fieldList = vertical.fields.map((f) => `"${f.key}" (${f.label})`).join(', ');
+  const sys = 'You are a call-analytics engine for a voice-AI platform. Analyze the sales/support call transcript. Respond ONLY with a compact JSON object, no prose.';
+  const usr = `Business type: ${vertical.name}. Goal of the call: ${vertical.goal}.
+Extract these vertical fields if present: ${fieldList}.
+Return JSON with keys: summary (1-2 sentences), sentiment ("positive"|"neutral"|"negative"), intent (short phrase), outcome (one of ${JSON.stringify(vertical.outcomes)}), score (0-100 integer for call quality/likelihood to convert), talkRatio (0-100 integer, percent the agent spoke), fields (object of the extracted vertical fields, omit unknown), coaching (array of 1-3 short coaching tips).
+Transcript:
+${text.slice(0, 6000)}`;
+  const out = await callLLM(sys, usr);
+  if (!out) return heuristicAnalyze(log, vertical);
+  try {
+    const j = JSON.parse(out);
+    j.engine = 'ai'; j.score = Math.max(0, Math.min(100, Math.round(Number(j.score) || 0)));
+    if (!j.coaching) j.coaching = [];
+    if (!j.fields) j.fields = {};
+    return j;
+  } catch (e) { return heuristicAnalyze(log, vertical); }
+}
+
+/* ---------------- Analytics endpoints --------------------------------- */
+const analysisCache = new Map(); // callId -> {at, analysis}
+async function fetchLog(req, id) {
+  if (req.user.demo) return demo.logs.find((l) => l.id === Number(id)) || null;
+  const { status, data } = await omni('GET', `/calls/logs/${id}`);
+  return status === 200 ? data : null;
+}
+async function recentLogs(req, limit) {
+  if (req.user.demo) return demo.logs.slice(0, limit);
+  if (isAdmin(req)) {
+    const { data } = await omni('GET', '/calls/logs', { query: { pageno: 1, pagesize: limit } });
+    return data.call_log_data || [];
+  }
+  let all = [];
+  for (const agentId of req.user.agentIds) {
+    const { data } = await omni('GET', '/calls/logs', { query: { pageno: 1, pagesize: 100, agentid: agentId } });
+    all = all.concat(data.call_log_data || []);
+  }
+  all.sort((a, b) => new Date(b.time_of_call) - new Date(a.time_of_call));
+  return all.slice(0, limit);
+}
+
+app.get('/api/verticals', (req, res) => {
+  res.json({ verticals: VERTICALS, current: (req.user && req.user.businessType) || 'general' });
+});
+app.post('/api/my/vertical', (req, res) => {
+  const bt = String((req.body || {}).businessType || '');
+  if (!VERTICALS[bt]) return res.status(400).json({ error: 'Unknown business type' });
+  db.updateUser(req.user.id, { businessType: bt });
+  res.json({ ok: true, businessType: bt, vertical: VERTICALS[bt] });
+});
+app.post('/api/admin/org/:id/vertical', adminOnly, (req, res) => {
+  const bt = String((req.body || {}).businessType || '');
+  if (!VERTICALS[bt]) return res.status(400).json({ error: 'Unknown business type' });
+  const u = db.updateUser(req.params.id, { businessType: bt });
+  if (!u) return res.status(404).json({ error: 'Org not found' });
+  res.json({ ok: true });
+});
+
+app.get('/api/analytics/call/:id', async (req, res) => {
+  try {
+    const cached = analysisCache.get(String(req.params.id));
+    if (cached && Date.now() - cached.at < 3600000) return res.json({ analysis: cached.analysis, cached: true });
+    const log = await fetchLog(req, req.params.id);
+    if (!log) return res.status(404).json({ error: 'Call not found' });
+    const analysis = await analyzeCall(log, verticalOf(req.user));
+    analysisCache.set(String(req.params.id), { at: Date.now(), analysis });
+    res.json({ analysis });
+  } catch (e) { res.status(502).json({ error: 'Analysis failed', detail: String(e.message || e) }); }
+});
+
+app.get('/api/analytics/overview', async (req, res) => {
+  try {
+    const vertical = verticalOf(req.user);
+    const logs = await recentLogs(req, 60);
+    const done = logs.filter((l) => convToText(l).length > 12);
+    const analyses = done.map((l) => heuristicAnalyze(l, vertical)); // fast, no external call
+    const n = analyses.length || 1;
+    const sent = { positive: 0, neutral: 0, negative: 0 };
+    const outcomes = {}; const intents = {};
+    let scoreSum = 0, talkSum = 0, booked = 0;
+    for (const a of analyses) {
+      sent[a.sentiment] = (sent[a.sentiment] || 0) + 1;
+      outcomes[a.outcome] = (outcomes[a.outcome] || 0) + 1;
+      intents[a.intent] = (intents[a.intent] || 0) + 1;
+      scoreSum += a.score; talkSum += a.talkRatio;
+      if (['booked', 'reservation_booked', 'appointment_booked', 'site_visit_booked', 'demo_booked', 'qualified', 'order_placed', 'confirmed'].includes(a.outcome)) booked++;
+    }
+    const total = logs.length;
+    const connected = logs.filter((l) => l.call_status === 'completed').length;
+    res.json({
+      vertical: { id: vertical.id, name: vertical.name, kpis: vertical.kpis },
+      totals: { calls: total, connected, analyzed: analyses.length },
+      avgScore: Math.round(scoreSum / n),
+      avgTalkRatio: Math.round(talkSum / n),
+      conversion: total ? Math.round((booked / total) * 100) : 0,
+      booked,
+      sentiment: sent,
+      outcomes: Object.entries(outcomes).sort((a, b) => b[1] - a[1]),
+      topIntents: Object.entries(intents).sort((a, b) => b[1] - a[1]).slice(0, 6),
+      aiEngine: aiProvider() === 'none' ? 'heuristic' : aiProvider(),
+    });
+  } catch (e) { res.status(502).json({ error: 'Overview failed', detail: String(e.message || e) }); }
+});
+
+/* ---------------- Live calls (near-real-time via polling) ------------- */
+const LIVE_STATES = ['in-progress', 'in_progress', 'ongoing', 'ringing', 'initiated', 'live', 'active'];
+app.get('/api/calls/live', async (req, res) => {
+  try {
+    if (req.user.demo) {
+      // Synthesize a believable live call that grows over a ~90s loop.
+      const script = [
+        { who: 'agent', text: 'Hi, this is Riya from MNB Research. Am I speaking with Aditya?' },
+        { who: 'user', text: 'Yes, that is me.' },
+        { who: 'agent', text: 'You had enquired about AI voice agents for your clinic. What takes up most of your front-desk time?' },
+        { who: 'user', text: 'Honestly, appointment calls all day long.' },
+        { who: 'agent', text: 'Our AI can answer and book those 24/7 in Hindi and English. Shall I set up a quick demo?' },
+        { who: 'user', text: 'Yes, that would really help us.' },
+        { who: 'agent', text: 'Wonderful. Booking you for Thursday at 4 PM. Confirmation on WhatsApp now.' },
+      ];
+      const secs = Math.floor((Date.now() / 1000) % 90);
+      const shown = Math.max(1, Math.min(script.length, Math.floor(secs / 12) + 1));
+      return res.json({
+        live: [{
+          id: 999001, bot_name: demo.agent.name, to_number: '+91 98111 45522',
+          call_status: 'in-progress', started_secs_ago: secs,
+          transcript: script.slice(0, shown),
+          done: shown >= script.length,
+        }],
+      });
+    }
+    const logs = await recentLogs(req, 40);
+    const live = logs.filter((l) => LIVE_STATES.includes(String(l.call_status || '').toLowerCase()))
+      .map((l) => ({ id: l.id, bot_name: l.bot_name, to_number: l.to_number, call_status: l.call_status, transcript: turns(convToText(l)) }));
+    res.json({ live });
+  } catch (e) { res.status(502).json({ error: 'Live fetch failed' }); }
+});
+app.get('/api/calls/:id/transcript', async (req, res) => {
+  try {
+    const log = await fetchLog(req, req.params.id);
+    if (!log) return res.status(404).json({ error: 'Call not found' });
+    res.json({ id: log.id, call_status: log.call_status, transcript: turns(convToText(log)), duration: log.call_duration });
+  } catch (e) { res.status(502).json({ error: 'Transcript fetch failed' }); }
+});
+
+/* ---------------- Integration send helpers (all guarded, fail-safe) --- */
+async function sendWhatsApp(to, text) {
+  const c = cfg('whatsapp');
+  const token = pref('whatsapp', 'token', 'WHATSAPP_TOKEN');
+  const phoneId = pref('whatsapp', 'phoneId', 'WHATSAPP_PHONE_ID');
+  if (!c.enabled || !token || !phoneId) return { ok: false, skipped: true };
+  const digits = String(to || '').replace(/[^\d]/g, '');
+  if (!digits) return { ok: false, error: 'no number' };
+  try {
+    const r = await fetch(`https://graph.facebook.com/v20.0/${phoneId}/messages`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ messaging_product: 'whatsapp', to: digits, type: 'text', text: { body: text } }),
+    });
+    const j = await r.json().catch(() => ({}));
+    return r.ok ? { ok: true, id: (j.messages && j.messages[0] && j.messages[0].id) || '' } : { ok: false, error: (j.error && j.error.message) || r.status };
+  } catch (e) { return { ok: false, error: String(e.message || e) }; }
+}
+async function postJson(url, payload) {
+  if (!url) return { ok: false, skipped: true };
+  try {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    return { ok: r.ok, status: r.status };
+  } catch (e) { return { ok: false, error: String(e.message || e) }; }
+}
+async function pushToSheet(obj) { const c = cfg('sheets'); if (!c.enabled || !c.webhookUrl) return { ok: false, skipped: true }; return postJson(c.webhookUrl, obj); }
+async function fireWebhook(payload) { const c = cfg('webhook'); if (!c.enabled || !c.url) return { ok: false, skipped: true }; return postJson(c.url, payload); }
+async function sendSlack(text) { const c = cfg('slack'); if (!c.enabled || !c.webhookUrl) return { ok: false, skipped: true }; return postJson(c.webhookUrl, { text }); }
+async function razorpayOrder(amountPaise, receipt) {
+  const c = cfg('razorpay');
+  const keyId = pref('razorpay', 'keyId', 'RAZORPAY_KEY_ID');
+  const keySecret = pref('razorpay', 'keySecret', 'RAZORPAY_KEY_SECRET');
+  if (!c.enabled || !keyId || !keySecret) return { ok: false, skipped: true };
+  try {
+    const auth = Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+    const r = await fetch('https://api.razorpay.com/v1/orders', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Basic ${auth}` },
+      body: JSON.stringify({ amount: amountPaise, currency: 'INR', receipt: receipt || ('mnb_' + Date.now()) }),
+    });
+    const j = await r.json().catch(() => ({}));
+    return r.ok ? { ok: true, order: j } : { ok: false, error: (j.error && j.error.description) || r.status };
+  } catch (e) { return { ok: false, error: String(e.message || e) }; }
+}
+
+// Fan out a new access-request lead to whichever integrations are enabled.
+function onNewLead(u) {
+  try {
+    const row = { event: 'new_lead', org: u.org, name: u.contact || '', email: u.email, phone: u.phone || '', looking_for: u.note || '', at: new Date().toISOString() };
+    pushToSheet(row).catch(() => {});
+    fireWebhook(row).catch(() => {});
+    sendSlack(`New MNB Omni Caller lead: *${u.org}* (${u.contact || u.email})${u.phone ? ' - ' + u.phone : ''}${u.note ? '\nWants: ' + u.note : ''}`).catch(() => {});
+    if (cfg('whatsapp').welcomeLeads && u.phone) {
+      sendWhatsApp(u.phone, `Hi ${(u.contact || '').split(' ')[0] || 'there'}, thanks for requesting access to MNB Omni Caller. Our team will reach out shortly. - MNB Research`).catch(() => {});
+    }
+  } catch (e) { /* never block signup */ }
+}
+
+/* ---------------- Admin: integrations control center ------------------ */
+const FREE_CATALOG = [
+  { key: 'ai', name: 'AI Call Analytics', tier: 'Groq free tier (very generous) or Google Gemini free tier', setup: 'Create a free key at console.groq.com or aistudio.google.com and paste it here. Until then, the built-in heuristic engine runs free with no key.' },
+  { key: 'whatsapp', name: 'WhatsApp Business', tier: 'Meta WhatsApp Cloud API - 1,000 free service conversations/month', setup: 'Create a Meta app, get a permanent token + phone number ID, paste below.' },
+  { key: 'razorpay', name: 'Razorpay Billing (INR)', tier: 'No monthly fee - pay only per transaction; Test mode is free', setup: 'Use Test keys from Razorpay Dashboard > Settings > API Keys to try it free.' },
+  { key: 'sheets', name: 'Google Sheets / CRM sync', tier: '100% free via a Google Apps Script Web App (no OAuth needed)', setup: 'Create a Sheet, add an Apps Script doPost that appends rows, Deploy as Web App, paste the URL.' },
+  { key: 'calendar', name: 'Calendar booking', tier: 'Free via Google Apps Script or Cal.com free tier', setup: 'Deploy an Apps Script that creates a Calendar event, paste the webhook URL.' },
+  { key: 'webhook', name: 'Generic Webhook / Zapier / Make', tier: 'Free - Zapier and Make both have free tiers; raw webhooks are free', setup: 'Paste any URL. We POST every lead and call event to it as JSON.' },
+  { key: 'slack', name: 'Slack / Discord alerts', tier: 'Free incoming webhooks', setup: 'Create an Incoming Webhook in Slack or Discord and paste the URL.' },
+];
+function maskedConfig() {
+  const c = integCfg();
+  const secretFields = { ai: ['groqKey', 'geminiKey'], whatsapp: ['token'], razorpay: ['keyId', 'keySecret'], sheets: ['webhookUrl'], calendar: ['webhookUrl'], webhook: ['url'], slack: ['webhookUrl'] };
+  const out = {};
+  for (const [sec, fields] of Object.entries(secretFields)) {
+    const s = c[sec] || {};
+    out[sec] = Object.assign({}, s);
+    for (const f of fields) if (s[f]) out[sec][f] = mask(s[f]);
+  }
+  return out;
+}
+function envPresence() {
+  const names = ['GROQ_API_KEY', 'GEMINI_API_KEY', 'WHATSAPP_TOKEN', 'WHATSAPP_PHONE_ID', 'RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET'];
+  const o = {}; for (const n of names) o[n] = !!process.env[n]; return o;
+}
+app.get('/api/admin/integrations', adminOnly, (req, res) => {
+  res.json({ config: maskedConfig(), env: envPresence(), catalog: FREE_CATALOG, aiProvider: aiProvider(), verticals: VERTICALS });
+});
+app.post('/api/admin/integrations', adminOnly, (req, res) => {
+  const { section, values } = req.body || {};
+  const allowed = ['ai', 'whatsapp', 'razorpay', 'sheets', 'calendar', 'webhook', 'slack'];
+  if (!allowed.includes(section)) return res.status(400).json({ error: 'Unknown section' });
+  // Do not overwrite a stored secret with a masked placeholder coming back from the UI.
+  const clean = {};
+  for (const [k, v] of Object.entries(values || {})) {
+    if (typeof v === 'string' && v.startsWith('****')) continue;
+    clean[k] = v;
+  }
+  saveIntegSection(section, clean);
+  res.json({ ok: true, config: maskedConfig(), aiProvider: aiProvider() });
+});
+app.post('/api/admin/integrations/test/:name', adminOnly, async (req, res) => {
+  const name = req.params.name;
+  const to = (req.body || {}).to || '';
+  try {
+    if (name === 'ai') {
+      const out = await callLLM('Respond only with JSON.', 'Return {"ok":true,"engine":"live"} as JSON.');
+      return res.json({ ok: !!out, provider: aiProvider(), sample: out ? out.slice(0, 120) : 'No key set - heuristic engine active (free).' });
+    }
+    if (name === 'whatsapp') return res.json(await sendWhatsApp(to, 'Test message from MNB Omni Caller. Your WhatsApp integration works.'));
+    if (name === 'sheets') return res.json(await pushToSheet({ event: 'test', at: new Date().toISOString(), note: 'MNB Omni Caller test row' }));
+    if (name === 'webhook') return res.json(await fireWebhook({ event: 'test', at: new Date().toISOString() }));
+    if (name === 'slack') return res.json(await sendSlack('Test alert from MNB Omni Caller. Integration works.'));
+    if (name === 'calendar') { const c = cfg('calendar'); return res.json(await postJson(c.webhookUrl, { event: 'test', title: 'MNB Omni Caller test event' })); }
+    if (name === 'razorpay') return res.json(await razorpayOrder(100, 'mnb_test_' + Date.now()));
+    return res.status(400).json({ error: 'Unknown integration' });
+  } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
+});
 
 /* ================= Static frontend ================= */
 // Public marketing site at the root; the dashboard SPA lives at /app.
