@@ -107,6 +107,7 @@ function createUser({ email, password, org, role = 'client', status = 'pending',
     agentIds: [],
     numberIds: [],
     minuteCap: 500,
+    agentCap: 5,
     createdAt: new Date().toISOString(),
   };
   state.users.push(user);

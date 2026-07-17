@@ -219,6 +219,7 @@ app.get('/api/me', async (req, res) => {
       minuteCap: user.minuteCap, usedMinutes: usage,
       agentIds: user.agentIds || [], numberIds: user.numberIds || [],
       businessType: user.businessType || 'general',
+      agentCap: user.role === 'admin' ? 0 : (user.agentCap || 5),
     },
   });
 });
@@ -318,7 +319,7 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
   const users = await Promise.all(db.listUsers().filter((u) => !u.demo).map(async (u) => ({
     id: u.id, email: u.email, org: u.org, role: u.role, status: u.status,
     contact: u.contact || '', phone: u.phone || '', note: u.note || '', businessType: u.businessType || 'general',
-    agentIds: u.agentIds, numberIds: u.numberIds, minuteCap: u.minuteCap, createdAt: u.createdAt,
+    agentIds: u.agentIds, numberIds: u.numberIds, minuteCap: u.minuteCap, agentCap: u.agentCap || 5, createdAt: u.createdAt,
     usedMinutes: u.role === 'client' && u.status === 'active' ? await getUsageMinutes(u).catch(() => null) : null,
   })));
   res.json({ users });
@@ -358,8 +359,51 @@ app.put('/api/agents/:id', (req, res, next) => {
   if (!ownsAgent(req, req.params.id)) return res.status(403).json({ error: 'This agent is not assigned to your organization' });
   next();
 }, relay('PUT', (r) => `/agents/${r.params.id}`));
-app.delete('/api/agents/:id', adminOnly, relay('DELETE', (r) => `/agents/${r.params.id}`));
-app.post('/api/agents', adminOnly, relay('POST', '/agents/create'));
+// Self-service agent creation. Any active (non-demo) account can create its
+// own AI agent; the new agent is auto-assigned to that account so the client
+// can train, dispatch, and manage it. Clients are capped by agentCap (admins
+// are unlimited). Demo writes are already blocked upstream.
+app.post('/api/agents', async (req, res) => {
+  try {
+    if (!isAdmin(req)) {
+      const cap = req.user.agentCap || 5;
+      const owned = (req.user.agentIds || []).length;
+      if (owned >= cap) {
+        return res.status(403).json({ error: `Agent limit reached (${owned}/${cap}). Contact MNB Research to raise your plan.` });
+      }
+    }
+    const { status, data } = await omni('POST', '/agents/create', { body: req.body });
+    if (status >= 200 && status < 300) {
+      const newId = data && (data.id || data.bot_id || data.agent_id || (data.bot && data.bot.id) || (data.agent && data.agent.id));
+      if (newId && !isAdmin(req)) {
+        const ids = Array.from(new Set([...(req.user.agentIds || []), Number(newId)]));
+        db.updateUser(req.user.id, { agentIds: ids });
+        req.user.agentIds = ids;
+      }
+      if (newId && !data.id) data.id = Number(newId);
+    }
+    res.status(status).json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(502).json({ error: 'Could not create agent', detail: String(err.message || err) });
+  }
+});
+
+// Owners (and admins) may delete their own agent; ownership record is cleaned up.
+app.delete('/api/agents/:id', async (req, res) => {
+  if (!ownsAgent(req, req.params.id)) return res.status(403).json({ error: 'This agent is not assigned to your organization' });
+  try {
+    const { status, data } = await omni('DELETE', `/agents/${req.params.id}`);
+    if (status >= 200 && status < 300 && !isAdmin(req)) {
+      const ids = (req.user.agentIds || []).filter((x) => Number(x) !== Number(req.params.id));
+      db.updateUser(req.user.id, { agentIds: ids });
+      req.user.agentIds = ids;
+    }
+    res.status(status).json(data);
+  } catch (err) {
+    res.status(502).json({ error: 'Could not delete agent', detail: String(err.message || err) });
+  }
+});
 
 /* ================= Calls (scoped + caps) ================= */
 app.post('/api/calls/dispatch', async (req, res) => {
