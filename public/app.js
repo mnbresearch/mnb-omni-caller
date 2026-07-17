@@ -112,10 +112,12 @@ function applyRoleUi() {
   const admin = me && me.role === 'admin';
   const demo = me && me.demo;
   $('navAdmin').classList.toggle('hidden', !admin);
-  $('newAgentBtn').classList.toggle('hidden', !admin);
+  // Self-service SaaS: any signed-in account (admin or client) can create and
+  // train its own agents. Only the read-only demo is prevented from writing.
+  $('newAgentBtn').classList.toggle('hidden', !!demo);
   $('demoBanner').classList.toggle('hidden', !demo);
   const delBtn = document.querySelector('#view-studio .view-head .btn.ghost[onclick="deleteAgent()"]');
-  if (delBtn) delBtn.classList.toggle('hidden', !admin);
+  if (delBtn) delBtn.classList.toggle('hidden', !!demo);
   $('whoami').textContent = me ? `${me.org} \u00B7 ${me.email}` : '';
   if (!admin && me && me.minuteCap > 0) {
     $('usageMeter').classList.remove('hidden');
