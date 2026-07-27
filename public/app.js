@@ -2264,3 +2264,710 @@ async function detachNumber(numberId) {
     host.parentNode.insertBefore(box, host);
   }
 })();
+
+
+/* =======================================================================
+ * MNB Omni Caller - v9 layer
+ * Export Center (CSV/JSON), a theme + accent customizer, and a guided
+ * product tour. All additive, guarded, frontend-only.
+ * ==================================================================== */
+(function () {
+  if (window.__mnbEnhanced9) return; window.__mnbEnhanced9 = true;
+  var T = function (m, ms) { try { toast(m, ms); } catch (e) {} };
+  var E = function (s) { try { return esc(s); } catch (e) { return String(s == null ? '' : s); } };
+  var SC = function (s) { try { return scrub(s); } catch (e) { return s; } };
+
+  var css = document.createElement('style'); css.id = 'mnb-v9-css';
+  css.textContent =
+    '.v9-fab{position:fixed;right:20px;bottom:20px;z-index:900;width:48px;height:48px;border-radius:50%;border:none;cursor:pointer;background:var(--accent-grad,linear-gradient(135deg,#ff7a18,#ffab5e));color:#111;font-size:22px;box-shadow:0 10px 30px rgba(0,0,0,.4);transition:transform .2s}' +
+    '.v9-fab:hover{transform:scale(1.08) rotate(20deg)}' +
+    '.v9-panel{position:fixed;right:20px;bottom:78px;z-index:900;width:280px;background:var(--panel,#141416);border:1px solid var(--border,#2b2b2f);border-radius:16px;padding:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);display:none}' +
+    '.v9-panel.on{display:block;animation:v9pop .18s ease}' +
+    '@keyframes v9pop{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}' +
+    '.v9-panel h4{margin:0 0 4px;font-size:14px}.v9-panel .m{color:var(--muted,#97938c);font-size:12px;margin-bottom:10px}' +
+    '.v9-sw{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}' +
+    '.v9-sw b{width:26px;height:26px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:.15s}' +
+    '.v9-sw b:hover{transform:scale(1.15)}.v9-sw b.on{border-color:var(--text,#fff)}' +
+    '.v9-mini{display:block;width:100%;text-align:left;border:1px solid var(--border,#2b2b2f);background:transparent;color:var(--text,#eee);border-radius:9px;padding:9px 11px;font-size:13px;cursor:pointer;margin-top:6px;font-weight:600}' +
+    '.v9-mini:hover{border-color:var(--accent,#ff7a18);color:var(--accent,#ff7a18)}' +
+    '.v9-exp{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:640px){.v9-exp{grid-template-columns:1fr}}' +
+    '.v9-card{background:var(--panel,#141416);border:1px solid var(--border,#2b2b2f);border-radius:14px;padding:18px}' +
+    '.v9-card h3{margin:0 0 4px;font-size:15px}.v9-card p{color:var(--muted,#97938c);font-size:13px;margin-bottom:12px}' +
+    '.v9-tour-ov{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.6);display:none}' +
+    '.v9-tour-ov.on{display:block}' +
+    '.v9-ring{position:absolute;border:2px solid var(--accent,#ff7a18);border-radius:12px;box-shadow:0 0 0 4px rgba(255,122,24,.25),0 0 0 4000px rgba(0,0,0,.55);transition:.25s}' +
+    '.v9-tip{position:absolute;max-width:280px;background:var(--panel,#141416);border:1px solid var(--border,#2b2b2f);border-radius:12px;padding:14px 16px;box-shadow:0 20px 50px rgba(0,0,0,.5)}' +
+    '.v9-tip h4{margin:0 0 6px;font-size:15px}.v9-tip p{color:var(--muted,#97938c);font-size:13px;margin-bottom:12px}' +
+    '.v9-tip .row{display:flex;justify-content:space-between;align-items:center}' +
+    '.v9-tip .step{color:var(--muted,#97938c);font-size:12px}' +
+    '.v9-tip button{border:none;border-radius:8px;padding:7px 14px;font-weight:700;font-size:13px;cursor:pointer;background:var(--accent-grad,linear-gradient(135deg,#ff7a18,#ffab5e));color:#111}' +
+    '.v9-tip .skip{background:transparent;color:var(--muted,#97938c);border:1px solid var(--border,#2b2b2f)}';
+  document.head.appendChild(css);
+
+  /* ---------------- Export Center (new view) ---------------- */
+  function mkView(id) { var m = document.querySelector('main.main') || (document.getElementById('view-overview') || {}).parentNode; if (!m) return null; var s = document.createElement('section'); s.id = 'view-' + id; s.className = 'view hidden'; m.appendChild(s); return s; }
+  function mkNav(id, ico, label) {
+    var nav = document.querySelector('.sidebar nav') || document.querySelector('nav'); if (!nav || document.querySelector('.nav-item[data-view="' + id + '"]')) return;
+    var a = document.createElement('a'); a.href = '#' + id; a.className = 'nav-item'; a.setAttribute('data-view', id);
+    a.innerHTML = '<span class="ico">' + ico + '</span> ' + label;
+    var anchor = document.querySelector('.nav-item[data-view="plan"]');
+    if (anchor && anchor.parentNode === nav) nav.insertBefore(a, anchor); else nav.appendChild(a);
+    a.addEventListener('click', function (e) { e.preventDefault(); window.switchView(id); });
+  }
+  var vExport = mkView('export');
+  mkNav('export', '&#8681;', 'Export');
+
+  var prevSwitch = window.switchView;
+  window.switchView = function (view) {
+    if (view === 'export') {
+      document.querySelectorAll('.view').forEach(function (v) { v.classList.add('hidden'); });
+      if (vExport) vExport.classList.remove('hidden');
+      document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.toggle('active', n.getAttribute('data-view') === 'export'); });
+      if (location.hash.replace('#', '') !== 'export') location.hash = 'export';
+      loadExport(); return;
+    }
+    return prevSwitch.apply(this, arguments);
+  };
+
+  function dl(name, text, type) {
+    var blob = new Blob([text], { type: type || 'text/csv' });
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+  }
+  function csvEsc(v) { return '"' + String(v == null ? '' : v).replace(/"/g, '""').replace(/<br\/?>(?=)/gi, ' ') + '"'; }
+  function toCsv(cols, rows) { return [cols.join(',')].concat(rows.map(function (r) { return r.map(csvEsc).join(','); })).join('\n'); }
+  function stamp() { return new Date().toISOString().slice(0, 10); }
+
+  function loadExport() {
+    vExport.innerHTML =
+      '<header class="view-head"><h2>Export Center</h2><p class="muted">Download your data anytime - calls, contacts, follow-ups and analytics.</p></header>' +
+      '<div class="v9-exp">' +
+        card('Call logs', 'Every call with time, number, duration, status and sentiment.', 'v9xCalls', 'Export calls CSV') +
+        card('Contacts', 'Your saved contacts and notes.', 'v9xContacts', 'Export contacts CSV') +
+        card('Follow-ups', 'Flagged calls and their notes.', 'v9xFollow', 'Export follow-ups CSV') +
+        card('Analytics', 'Full analytics snapshot as JSON.', 'v9xAna', 'Export analytics JSON') +
+      '</div>';
+    function card(h, p, id, label) { return '<div class="v9-card"><h3>' + h + '</h3><p>' + p + '</p><button class="v9-mini" id="' + id + '">' + label + '</button></div>'; }
+    document.getElementById('v9xCalls').addEventListener('click', exportCalls);
+    document.getElementById('v9xContacts').addEventListener('click', function () {
+      var c = JSON.parse(localStorage.getItem('mnb_contacts') || '[]');
+      dl('mnb-contacts-' + stamp() + '.csv', toCsv(['name', 'number', 'note'], c.map(function (x) { return [x.name, x.num, x.note || '']; })));
+      T('Contacts exported');
+    });
+    document.getElementById('v9xFollow').addEventListener('click', function () {
+      var f = JSON.parse(localStorage.getItem('mnb_followups') || '{}');
+      var rows = Object.keys(f).map(function (k) { var i = f[k]; return [i.number || '', i.note || '', i.done ? 'done' : 'pending', i.time || (i.at ? new Date(i.at).toLocaleString() : '')]; });
+      dl('mnb-followups-' + stamp() + '.csv', toCsv(['number', 'note', 'status', 'when'], rows));
+      T('Follow-ups exported');
+    });
+    document.getElementById('v9xAna').addEventListener('click', async function () {
+      try { var o = await api('/analytics/overview'); dl('mnb-analytics-' + stamp() + '.json', JSON.stringify(o, null, 2), 'application/json'); T('Analytics exported'); }
+      catch (e) { T('Could not export analytics', 4000); }
+    });
+  }
+  async function exportCalls() {
+    T('Preparing calls...');
+    var all = [];
+    try {
+      for (var p = 1; p <= 10; p++) {
+        var d = await api('/calls/logs?pageno=' + p + '&pagesize=100');
+        var rows = d.call_log_data || [];
+        all = all.concat(rows);
+        if (rows.length < 100) break;
+      }
+    } catch (e) {}
+    if (!all.length) return T('No calls to export');
+    var cols = ['time_of_call', 'bot_name', 'from_number', 'to_number', 'call_duration', 'call_status', 'sentiment_score'];
+    var rows = all.map(function (r) { return cols.map(function (c) { return SC(r[c]); }); });
+    dl('mnb-calls-' + stamp() + '.csv', toCsv(cols, rows));
+    T('Exported ' + all.length + ' calls');
+  }
+
+  /* ---------------- Theme + accent customizer ---------------- */
+  var ACCENTS = [
+    ['#ff7a18', '#ffab5e'], ['#2f7bff', '#6aa8ff'], ['#8b5cff', '#b79bff'],
+    ['#16b981', '#4fd6a8'], ['#ff5e9a', '#ff97c0'], ['#22c3e6', '#67e0f5']
+  ];
+  function applyAccent(pair) {
+    var r = document.documentElement.style;
+    r.setProperty('--accent', pair[0]); r.setProperty('--accent-2', pair[1]);
+    r.setProperty('--accent-grad', 'linear-gradient(135deg,' + pair[0] + ',' + pair[1] + ')');
+  }
+  (function () { try { var s = JSON.parse(localStorage.getItem('mnb_accent')); if (s && s.length === 2) applyAccent(s); } catch (e) {} })();
+
+  var fab = document.createElement('button'); fab.className = 'v9-fab'; fab.title = 'Personalize'; fab.innerHTML = '&#9881;';
+  var panel = document.createElement('div'); panel.className = 'v9-panel';
+  panel.innerHTML =
+    '<h4>Personalize</h4><div class="m">Make it yours - saved to this browser.</div>' +
+    '<div class="v9-sw" id="v9sw">' + ACCENTS.map(function (a, i) { return '<b data-i="' + i + '" style="background:linear-gradient(135deg,' + a[0] + ',' + a[1] + ')"></b>'; }).join('') + '</div>' +
+    '<button class="v9-mini" id="v9theme">&#9681; Toggle light / dark</button>' +
+    '<button class="v9-mini" id="v9tour">&#9658; Take the product tour</button>';
+  document.body.appendChild(fab); document.body.appendChild(panel);
+  fab.addEventListener('click', function () { panel.classList.toggle('on'); markAccent(); });
+  panel.querySelector('#v9sw').addEventListener('click', function (e) {
+    var b = e.target.closest('b[data-i]'); if (!b) return;
+    var pair = ACCENTS[Number(b.getAttribute('data-i'))]; applyAccent(pair); save('mnb_accent', pair); markAccent(); T('Accent updated');
+  });
+  panel.querySelector('#v9theme').addEventListener('click', function () { try { toggleTheme(); } catch (e) {} });
+  panel.querySelector('#v9tour').addEventListener('click', function () { panel.classList.remove('on'); startTour(); });
+  function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  function markAccent() {
+    var cur = null; try { cur = JSON.parse(localStorage.getItem('mnb_accent')); } catch (e) {}
+    panel.querySelectorAll('#v9sw b').forEach(function (b, i) { b.classList.toggle('on', cur ? (ACCENTS[i][0] === cur[0]) : i === 0); });
+  }
+
+  /* ---------------- Product tour ---------------- */
+  var TOUR = [
+    { v: 'overview', h: 'Your command center', p: 'Live KPIs, quick actions and a snapshot of every call your agents make.' },
+    { v: 'call', h: 'Place a call', p: 'Pick an agent, enter a number and dispatch a real AI call in seconds.' },
+    { v: 'studio', h: 'Agent Studio', p: 'Create and train your own AI agents - purpose, voice, knowledge and flow.' },
+    { v: 'live', h: 'Live Calls', p: 'Watch calls as they happen with a rolling transcript and real-time AI read-out.' },
+    { v: 'analytics', h: 'Call Analytics', p: 'AI scoring, sentiment, outcomes and coaching on every conversation.' },
+    { v: 'contacts', h: 'Contacts', p: 'Save the numbers you call often and dial them in one tap.' },
+    { v: 'followups', h: 'Follow-ups', p: 'Flag any call to circle back on - nothing slips through.' },
+    { v: 'export', h: 'Export Center', p: 'Download your calls, contacts and analytics whenever you need.' }
+  ];
+  var ov = document.createElement('div'); ov.className = 'v9-tour-ov';
+  ov.innerHTML = '<div class="v9-ring" id="v9ring"></div><div class="v9-tip" id="v9tip"></div>';
+  document.body.appendChild(ov);
+  var ti = 0;
+  function startTour() { ti = 0; ov.classList.add('on'); showStep(); }
+  function endTour() { ov.classList.remove('on'); try { localStorage.setItem('mnb_tour_done', '1'); } catch (e) {} }
+  function showStep() {
+    while (ti < TOUR.length && !document.querySelector('.nav-item[data-view="' + TOUR[ti].v + '"]')) ti++;
+    if (ti >= TOUR.length) return endTour();
+    var step = TOUR[ti];
+    var el = document.querySelector('.nav-item[data-view="' + step.v + '"]');
+    var r = el.getBoundingClientRect();
+    var ring = document.getElementById('v9ring');
+    ring.style.left = (r.left - 6) + 'px'; ring.style.top = (r.top - 6) + 'px';
+    ring.style.width = (r.width + 12) + 'px'; ring.style.height = (r.height + 12) + 'px';
+    var tip = document.getElementById('v9tip');
+    tip.innerHTML = '<h4>' + E(step.h) + '</h4><p>' + E(step.p) + '</p>' +
+      '<div class="row"><span class="step">' + (ti + 1) + ' / ' + TOUR.length + '</span><span>' +
+      '<button class="skip" id="v9skip">Skip</button> <button id="v9next">' + (ti === TOUR.length - 1 ? 'Done' : 'Next') + '</button></span></div>';
+    var top = Math.min(r.top, window.innerHeight - 160);
+    tip.style.left = Math.min(r.right + 16, window.innerWidth - 300) + 'px';
+    tip.style.top = top + 'px';
+    document.getElementById('v9next').addEventListener('click', function () { ti++; showStep(); });
+    document.getElementById('v9skip').addEventListener('click', endTour);
+  }
+  ov.addEventListener('click', function (e) { if (e.target === ov) endTour(); });
+
+  /* auto-run the tour once for first-time users */
+  setTimeout(function () {
+    try { if (!localStorage.getItem('mnb_tour_done') && document.getElementById('appShell') && !document.getElementById('appShell').classList.contains('hidden')) startTour(); } catch (e) {}
+  }, 2500);
+})();
+
+
+/* =======================================================================
+ * MNB Omni Caller - v10 layer
+ * Agent Templates gallery (ready-made vertical blueprints that pre-fill the
+ * New Agent form) + Spotlight search (Ctrl/Cmd+/) across calls & contacts.
+ * Additive, guarded, frontend-only.
+ * ==================================================================== */
+(function () {
+  if (window.__mnbEnhanced10) return; window.__mnbEnhanced10 = true;
+  var T = function (m, ms) { try { toast(m, ms); } catch (e) {} };
+  var E = function (s) { try { return esc(s); } catch (e) { return String(s == null ? '' : s); } };
+  var digits = function (s) { return String(s || '').replace(/[^\d]/g, ''); };
+
+  var css = document.createElement('style'); css.id = 'mnb-v10-css';
+  css.textContent =
+    '.v10-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}@media(max-width:900px){.v10-grid{grid-template-columns:1fr}}' +
+    '.v10-tpl{background:var(--panel,#141416);border:1px solid var(--border,#2b2b2f);border-radius:16px;padding:20px;transition:.2s}' +
+    '.v10-tpl:hover{border-color:var(--accent,#ff7a18);transform:translateY(-3px)}' +
+    '.v10-tpl .e{font-size:30px}.v10-tpl h3{margin:8px 0 4px;font-size:16px}.v10-tpl p{color:var(--muted,#97938c);font-size:13px;min-height:56px}' +
+    '.v10-tpl button{border:none;border-radius:9px;padding:9px 14px;font-weight:700;font-size:13px;cursor:pointer;background:var(--accent-grad,linear-gradient(135deg,#ff7a18,#ffab5e));color:#111;width:100%}' +
+    '.v10-spot-ov{position:fixed;inset:0;z-index:1100;background:rgba(0,0,0,.5);display:none;align-items:flex-start;justify-content:center}' +
+    '.v10-spot-ov.on{display:flex}' +
+    '.v10-spot{width:min(620px,92vw);margin-top:12vh;background:var(--panel,#141416);border:1px solid var(--border,#2b2b2f);border-radius:16px;box-shadow:0 30px 80px rgba(0,0,0,.6);overflow:hidden}' +
+    '.v10-spot input{width:100%;box-sizing:border-box;border:none;background:transparent;color:var(--text,#eee);padding:18px 20px;font-size:17px;outline:none;border-bottom:1px solid var(--border,#2b2b2f)}' +
+    '.v10-res{max-height:50vh;overflow:auto}' +
+    '.v10-r{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 18px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.04)}' +
+    '.v10-r:hover,.v10-r.sel{background:rgba(255,122,24,.10)}' +
+    '.v10-r .m{color:var(--muted,#97938c);font-size:12px}' +
+    '.v10-tag{font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;background:rgba(255,122,24,.16);color:var(--accent-2,#ffa64d)}';
+  document.head.appendChild(css);
+
+  /* ---------------- view + nav ---------------- */
+  function mkView(id) { var m = document.querySelector('main.main') || (document.getElementById('view-overview') || {}).parentNode; if (!m) return null; var s = document.createElement('section'); s.id = 'view-' + id; s.className = 'view hidden'; m.appendChild(s); return s; }
+  function mkNav(id, ico, label) {
+    var nav = document.querySelector('.sidebar nav') || document.querySelector('nav'); if (!nav || document.querySelector('.nav-item[data-view="' + id + '"]')) return;
+    var a = document.createElement('a'); a.href = '#' + id; a.className = 'nav-item'; a.setAttribute('data-view', id);
+    a.innerHTML = '<span class="ico">' + ico + '</span> ' + label;
+    var anchor = document.querySelector('.nav-item[data-view="studio"]');
+    if (anchor && anchor.nextSibling) nav.insertBefore(a, anchor.nextSibling); else nav.appendChild(a);
+    a.addEventListener('click', function (e) { e.preventDefault(); window.switchView(id); });
+  }
+  var vTpl = mkView('templates');
+  mkNav('templates', '&#9733;', 'Templates');
+
+  var prevSwitch = window.switchView;
+  window.switchView = function (view) {
+    if (view === 'templates') {
+      document.querySelectorAll('.view').forEach(function (v) { v.classList.add('hidden'); });
+      if (vTpl) vTpl.classList.remove('hidden');
+      document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.toggle('active', n.getAttribute('data-view') === 'templates'); });
+      if (location.hash.replace('#', '') !== 'templates') location.hash = 'templates';
+      loadTemplates(); return;
+    }
+    return prevSwitch.apply(this, arguments);
+  };
+
+  /* ---------------- Agent Templates ---------------- */
+  var TPL = [
+    { e: '&#127869;&#65039;', name: 'Restaurant Reservation Assistant', desc: 'Takes table bookings and orders, captures party size, timing and special requests.',
+      welcome: 'Hi, thanks for calling! I can help you book a table or place an order. How can I help today?',
+      purpose: 'You take restaurant reservations and orders. Capture party size, preferred date and time, occasion and any special requests. Confirm the booking clearly and offer to send a WhatsApp confirmation. Be warm, quick and friendly.' },
+    { e: '&#129466;', name: 'Clinic Appointment Desk', desc: 'Books and reschedules appointments, triages urgency, captures patient details.',
+      welcome: 'Hello, thank you for calling. I can help you book or reschedule an appointment. How can I help?',
+      purpose: 'You are a clinic front-desk assistant. Book or reschedule appointments; capture the department/specialty, preferred date and time, whether the patient is new or returning, and the reason. Politely flag anything urgent for immediate attention.' },
+    { e: '&#127968;', name: 'Real Estate Qualifier', desc: 'Qualifies buyers and renters and books site visits.',
+      welcome: 'Hi! Thanks for your interest. I can help you find the right property. May I ask a few quick questions?',
+      purpose: 'You qualify real-estate leads. Capture budget, preferred locality, configuration (BHK), whether they want to buy or rent, and their timeline. If they are a good fit, book a site visit and confirm contact details.' },
+    { e: '&#128722;', name: 'E-commerce Order & Support', desc: 'Confirms COD orders, recovers carts, handles returns and order status.',
+      welcome: 'Hi, thanks for shopping with us! I can help with your order. What do you need?',
+      purpose: 'You handle e-commerce order support. Confirm COD orders, recover abandoned carts by offering help, handle return/replacement requests, and answer order-status questions. Capture the order ID and resolution.' },
+    { e: '&#127891;', name: 'Admissions Counselor', desc: 'Captures course interest and books counselling or demo sessions.',
+      welcome: 'Hello! Thanks for your interest in our courses. I can help you with details and admissions.',
+      purpose: 'You are an admissions counselor. Capture the course of interest, the admission stage, and any fee questions. Answer clearly and book a counselling or demo session. Capture the city and preferred contact time.' },
+    { e: '&#127974;', name: 'Lending & Loan Assistant', desc: 'Qualifies eligibility and progresses loan applications or collections.',
+      welcome: 'Hi, thanks for calling. I can help with your loan enquiry. May I ask a few details?',
+      purpose: 'You assist with lending. Capture the loan/product type, ticket size, KYC stage and EMI/collection status. Assess basic eligibility politely and progress the application or arrange a callback with a specialist.' }
+  ];
+  function loadTemplates() {
+    vTpl.innerHTML =
+      '<header class="view-head"><h2>Agent Templates</h2><p class="muted">Start from a proven blueprint - pick one and it pre-fills a new agent you can tweak and train.</p></header>' +
+      '<div class="v10-grid">' + TPL.map(function (t, i) {
+        return '<div class="v10-tpl"><div class="e">' + t.e + '</div><h3>' + E(t.name) + '</h3><p>' + E(t.desc) + '</p>' +
+          '<button data-tpl="' + i + '">Use this template</button></div>';
+      }).join('') + '</div>';
+    vTpl.querySelectorAll('[data-tpl]').forEach(function (b) {
+      b.addEventListener('click', function () { useTemplate(TPL[Number(b.getAttribute('data-tpl'))]); });
+    });
+  }
+  function useTemplate(t) {
+    if (typeof openAgentModal !== 'function') { T('Open Agent Studio to create an agent'); return; }
+    openAgentModal();
+    setTimeout(function () {
+      var n = document.getElementById('naName'), w = document.getElementById('naWelcome'), p = document.getElementById('naPurpose');
+      if (n) n.value = t.name; if (w) w.value = t.welcome; if (p) p.value = t.purpose;
+      if (n) n.focus();
+      T('Template loaded - review and Create agent');
+    }, 120);
+  }
+
+  /* ---------------- Spotlight search (Ctrl/Cmd + /) ---------------- */
+  var ov = document.createElement('div'); ov.className = 'v10-spot-ov';
+  ov.innerHTML = '<div class="v10-spot"><input id="v10q" placeholder="Search calls and contacts..." autocomplete="off"><div class="v10-res" id="v10res"></div></div>';
+  document.body.appendChild(ov);
+  var callCache = null, sel = 0, results = [];
+  function openSpot() {
+    ov.classList.add('on'); var q = document.getElementById('v10q'); q.value = ''; document.getElementById('v10res').innerHTML = '<div class="v10-r"><span class="m">Type to search your recent calls and saved contacts</span></div>';
+    q.focus(); if (!callCache) primeCalls();
+  }
+  function closeSpot() { ov.classList.remove('on'); }
+  async function primeCalls() {
+    try { var d = await api('/calls/logs?pageno=1&pagesize=100'); callCache = d.call_log_data || []; } catch (e) { callCache = []; }
+  }
+  function contacts() { try { return JSON.parse(localStorage.getItem('mnb_contacts') || '[]'); } catch (e) { return []; } }
+  function run(q) {
+    q = (q || '').toLowerCase().trim(); var out = [];
+    if (q) {
+      contacts().forEach(function (c) {
+        if ((c.name + ' ' + c.num + ' ' + (c.note || '')).toLowerCase().indexOf(q) >= 0)
+          out.push({ type: 'Contact', title: c.name, sub: c.num, num: c.num });
+      });
+      (callCache || []).forEach(function (l) {
+        var hay = ((l.to_number || '') + ' ' + (l.from_number || '') + ' ' + (l.call_status || '') + ' ' + (l.bot_name || '')).toLowerCase();
+        if (hay.indexOf(q) >= 0) out.push({ type: 'Call', title: l.to_number || ('Call ' + l.id), sub: (l.call_status || '') + ' - ' + (l.time_of_call || ''), log: l });
+      });
+    }
+    results = out.slice(0, 40); sel = 0; render();
+  }
+  function render() {
+    var host = document.getElementById('v10res');
+    if (!results.length) { host.innerHTML = '<div class="v10-r"><span class="m">No matches</span></div>'; return; }
+    host.innerHTML = results.map(function (r, i) {
+      return '<div class="v10-r' + (i === sel ? ' sel' : '') + '" data-i="' + i + '"><div><b>' + E(r.title) + '</b><div class="m">' + E(r.sub) + '</div></div><span class="v10-tag">' + r.type + '</span></div>';
+    }).join('');
+    host.querySelectorAll('[data-i]').forEach(function (el) { el.addEventListener('click', function () { pick(results[Number(el.getAttribute('data-i'))]); }); });
+  }
+  function pick(r) {
+    if (!r) return; closeSpot();
+    if (r.type === 'Contact') {
+      window.switchView('call');
+      setTimeout(function () { var f = document.getElementById('callNumber'); if (f) { f.value = r.num; f.focus(); } }, 150);
+    } else if (r.log) {
+      if (typeof openDrawer === 'function') { window.switchView('logs'); setTimeout(function () { openDrawer(r.log); }, 200); }
+      else window.switchView('logs');
+    }
+  }
+  document.getElementById('v10q').addEventListener('input', function (e) { run(e.target.value); });
+  ov.addEventListener('click', function (e) { if (e.target === ov) closeSpot(); });
+  document.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && (e.key === '/' || e.code === 'Slash')) { e.preventDefault(); openSpot(); return; }
+    if (!ov.classList.contains('on')) return;
+    if (e.key === 'Escape') { closeSpot(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(results.length - 1, sel + 1); render(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(0, sel - 1); render(); }
+    else if (e.key === 'Enter') { pick(results[sel]); }
+  });
+})();
+
+
+/* =======================================================================
+ * MNB Omni Caller - v11 layer
+ * Reminders hub: schedule callbacks/tasks with due date-times, get a live
+ * sidebar badge for what's due, and optional desktop notifications.
+ * Additive, guarded, frontend-only (synced to this browser).
+ * ==================================================================== */
+(function () {
+  if (window.__mnbEnhanced11) return; window.__mnbEnhanced11 = true;
+  var T = function (m, ms) { try { toast(m, ms); } catch (e) {} };
+  var E = function (s) { try { return esc(s); } catch (e) { return String(s == null ? '' : s); } };
+  var KEY = 'mnb_reminders';
+  function load() { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return []; } }
+  function save(v) { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch (e) {} refreshBadge(); }
+
+  var css = document.createElement('style'); css.id = 'mnb-v11-css';
+  css.textContent =
+    '.v11-form{display:grid;grid-template-columns:1.6fr 1fr 1fr auto;gap:8px;margin-bottom:16px}@media(max-width:760px){.v11-form{grid-template-columns:1fr}}' +
+    '.v11-form input{background:var(--bg,#0e0f12);border:1px solid var(--border,#2b2b2f);color:var(--text,#eee);border-radius:9px;padding:10px 12px;font-size:13px}' +
+    '.v11-row{display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid var(--border,#2b2b2f);border-radius:12px;padding:12px 14px;background:var(--panel,#141416);margin-bottom:8px}' +
+    '.v11-row.due{border-color:#e05d55;box-shadow:0 0 0 1px rgba(224,93,85,.3)}' +
+    '.v11-row.soon{border-color:var(--accent,#ff7a18)}' +
+    '.v11-row .m{color:var(--muted,#97938c);font-size:12px}' +
+    '.v11-mini{border:1px solid var(--border,#2b2b2f);background:transparent;color:var(--text,#eee);border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;font-weight:600}' +
+    '.v11-mini:hover{border-color:var(--accent,#ff7a18);color:var(--accent,#ff7a18)}' +
+    '.v11-mini.pri{background:var(--accent-grad,linear-gradient(135deg,#ff7a18,#ffab5e));color:#111;border:none}' +
+    '.v11-mini.wa{border-color:#25D366;color:#25D366}' +
+    '.v11-badge{display:inline-block;min-width:18px;height:18px;line-height:18px;text-align:center;background:#e05d55;color:#fff;border-radius:9px;font-size:11px;font-weight:800;margin-left:6px;padding:0 5px}' +
+    '.v11-sechdr{font-size:12px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted,#97938c);margin:14px 0 6px}';
+  document.head.appendChild(css);
+
+  function mkView(id) { var m = document.querySelector('main.main') || (document.getElementById('view-overview') || {}).parentNode; if (!m) return null; var s = document.createElement('section'); s.id = 'view-' + id; s.className = 'view hidden'; m.appendChild(s); return s; }
+  function mkNav(id, ico, label) {
+    var nav = document.querySelector('.sidebar nav') || document.querySelector('nav'); if (!nav || document.querySelector('.nav-item[data-view="' + id + '"]')) return;
+    var a = document.createElement('a'); a.href = '#' + id; a.className = 'nav-item'; a.setAttribute('data-view', id);
+    a.innerHTML = '<span class="ico">' + ico + '</span> ' + label;
+    var anchor = document.querySelector('.nav-item[data-view="plan"]');
+    if (anchor && anchor.parentNode === nav) nav.insertBefore(a, anchor); else nav.appendChild(a);
+    a.addEventListener('click', function (e) { e.preventDefault(); window.switchView(id); });
+  }
+  var vRem = mkView('reminders');
+  mkNav('reminders', '&#9200;', 'Reminders');
+
+  var prevSwitch = window.switchView;
+  window.switchView = function (view) {
+    if (view === 'reminders') {
+      document.querySelectorAll('.view').forEach(function (v) { v.classList.add('hidden'); });
+      if (vRem) vRem.classList.remove('hidden');
+      document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.toggle('active', n.getAttribute('data-view') === 'reminders'); });
+      if (location.hash.replace('#', '') !== 'reminders') location.hash = 'reminders';
+      loadReminders(); return;
+    }
+    return prevSwitch.apply(this, arguments);
+  };
+
+  function fmt(ts) { if (!ts) return ''; try { return new Date(ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }); } catch (e) { return ''; } }
+  function dueCount() { var now = Date.now(); return load().filter(function (r) { return !r.done && r.when && r.when <= now; }).length; }
+  function refreshBadge() {
+    var nav = document.querySelector('.nav-item[data-view="reminders"]'); if (!nav) return;
+    var c = dueCount(); var b = nav.querySelector('.v11-badge');
+    if (c > 0) { if (!b) { b = document.createElement('span'); b.className = 'v11-badge'; nav.appendChild(b); } b.textContent = c; }
+    else if (b) { b.remove(); }
+  }
+
+  function loadReminders() {
+    vRem.innerHTML =
+      '<header class="view-head"><h2>Reminders</h2><p class="muted">Schedule callbacks and tasks. You will get a badge - and a desktop alert - when one is due.</p></header>' +
+      '<div class="card"><div class="v11-form">' +
+        '<input id="v11t" placeholder="What to do (e.g. call Aarav back)">' +
+        '<input id="v11n" placeholder="Number (optional)">' +
+        '<input id="v11d" type="datetime-local">' +
+        '<button class="v11-mini pri" id="v11add">Add reminder</button>' +
+      '</div><div id="v11list"></div></div>';
+    document.getElementById('v11add').addEventListener('click', function () {
+      var t = document.getElementById('v11t').value.trim();
+      var n = document.getElementById('v11n').value.trim();
+      var d = document.getElementById('v11d').value;
+      if (!t) return T('Add a description');
+      var when = d ? new Date(d).getTime() : 0;
+      var l = load(); l.push({ id: Date.now(), text: t, num: n, when: when, done: false, notified: false }); save(l);
+      askNotify(); T('Reminder added'); loadReminders();
+    });
+    render();
+  }
+  function render() {
+    var host = document.getElementById('v11list'); if (!host) return;
+    var l = load().filter(function (r) { return !r.done; }).sort(function (a, b) { return (a.when || 9e15) - (b.when || 9e15); });
+    var done = load().filter(function (r) { return r.done; });
+    if (!l.length && !done.length) { host.innerHTML = '<p class="muted">No reminders yet.</p>'; return; }
+    var now = Date.now();
+    var html = l.map(function (r) {
+      var cls = r.when && r.when <= now ? ' due' : (r.when && r.when - now < 3600000 ? ' soon' : '');
+      var digits = (r.num || '').replace(/[^\d]/g, '');
+      return '<div class="v11-row' + cls + '"><div><b>' + E(r.text) + '</b>' + (r.num ? ' <span class="m">' + E(r.num) + '</span>' : '') +
+        '<div class="m">' + (r.when ? fmt(r.when) : 'No time set') + (r.when && r.when <= now ? ' - DUE' : '') + '</div></div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+          (r.num ? '<button class="v11-mini pri" data-call="' + E(r.num) + '">Call</button><a class="v11-mini wa" target="_blank" rel="noopener" href="https://wa.me/' + digits + '">WhatsApp</a>' : '') +
+          '<button class="v11-mini" data-done="' + r.id + '">Done</button><button class="v11-mini" data-del="' + r.id + '">Delete</button>' +
+        '</div></div>';
+    }).join('');
+    if (done.length) html += '<div class="v11-sechdr">Completed</div>' + done.slice(-10).reverse().map(function (r) {
+      return '<div class="v11-row" style="opacity:.6"><div><b>' + E(r.text) + '</b><div class="m">' + fmt(r.when) + '</div></div><button class="v11-mini" data-del="' + r.id + '">Delete</button></div>';
+    }).join('');
+    host.innerHTML = html;
+    host.querySelectorAll('[data-call]').forEach(function (b) { b.addEventListener('click', function () {
+      window.switchView('call'); setTimeout(function () { var f = document.getElementById('callNumber'); if (f) { f.value = b.getAttribute('data-call'); f.focus(); } }, 150);
+    }); });
+    host.querySelectorAll('[data-done]').forEach(function (b) { b.addEventListener('click', function () { var l = load(); var r = l.filter(function (x) { return String(x.id) === b.getAttribute('data-done'); })[0]; if (r) r.done = true; save(l); render(); }); });
+    host.querySelectorAll('[data-del]').forEach(function (b) { b.addEventListener('click', function () { save(load().filter(function (x) { return String(x.id) !== b.getAttribute('data-del'); })); render(); }); });
+  }
+
+  function askNotify() { try { if (window.Notification && Notification.permission === 'default') Notification.requestPermission(); } catch (e) {} }
+  function checkDue() {
+    var l = load(); var now = Date.now(); var changed = false;
+    l.forEach(function (r) {
+      if (!r.done && !r.notified && r.when && r.when <= now) {
+        r.notified = true; changed = true;
+        T('Reminder due: ' + r.text, 6000);
+        try { if (window.Notification && Notification.permission === 'granted') new Notification('MNB Omni Caller - reminder due', { body: r.text + (r.num ? ' (' + r.num + ')' : '') }); } catch (e) {}
+      }
+    });
+    if (changed) { try { localStorage.setItem(KEY, JSON.stringify(l)); } catch (e) {} }
+    refreshBadge();
+  }
+  setInterval(checkDue, 60000);
+  setTimeout(function () { refreshBadge(); checkDue(); }, 3000);
+})();
+
+
+/* =======================================================================
+ * MNB Omni Caller - v12 layer
+ * Do-Not-Call safeguard: a managed blocklist, a warning before dialing a
+ * blocked number, and one-click "block" from any call. Compliance-friendly.
+ * Additive, guarded, frontend-only.
+ * ==================================================================== */
+(function () {
+  if (window.__mnbEnhanced12) return; window.__mnbEnhanced12 = true;
+  var T = function (m, ms) { try { toast(m, ms); } catch (e) {} };
+  var E = function (s) { try { return esc(s); } catch (e) { return String(s == null ? '' : s); } };
+  var KEY = 'mnb_dnc';
+  var d10 = function (s) { var d = String(s || '').replace(/[^\d]/g, ''); return d.length > 10 ? d.slice(-10) : d; };
+  function load() { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return []; } }
+  function save(v) { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch (e) {} refreshBadge(); }
+  function isDnc(num) { var k = d10(num); if (!k) return false; return load().some(function (x) { return d10(x.num) === k; }); }
+  function addDnc(num, reason) { if (!num) return; var l = load(); if (isDnc(num)) return; l.unshift({ num: num, reason: reason || '', at: Date.now() }); save(l); }
+
+  var css = document.createElement('style'); css.id = 'mnb-v12-css';
+  css.textContent =
+    '.v12-form{display:grid;grid-template-columns:1fr 1.6fr auto;gap:8px;margin-bottom:16px}@media(max-width:640px){.v12-form{grid-template-columns:1fr}}' +
+    '.v12-form input{background:var(--bg,#0e0f12);border:1px solid var(--border,#2b2b2f);color:var(--text,#eee);border-radius:9px;padding:10px 12px;font-size:13px}' +
+    '.v12-row{display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid var(--border,#2b2b2f);border-radius:12px;padding:12px 14px;background:var(--panel,#141416);margin-bottom:8px}' +
+    '.v12-row .m{color:var(--muted,#97938c);font-size:12px}' +
+    '.v12-mini{border:1px solid var(--border,#2b2b2f);background:transparent;color:var(--text,#eee);border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;font-weight:600}' +
+    '.v12-mini:hover{border-color:#e05d55;color:#e05d55}' +
+    '.v12-mini.pri{background:var(--accent-grad,linear-gradient(135deg,#ff7a18,#ffab5e));color:#111;border:none}' +
+    '.v12-mini.blk{border-color:#e05d55;color:#e05d55}';
+  document.head.appendChild(css);
+
+  function mkView(id) { var m = document.querySelector('main.main') || (document.getElementById('view-overview') || {}).parentNode; if (!m) return null; var s = document.createElement('section'); s.id = 'view-' + id; s.className = 'view hidden'; m.appendChild(s); return s; }
+  function mkNav(id, ico, label) {
+    var nav = document.querySelector('.sidebar nav') || document.querySelector('nav'); if (!nav || document.querySelector('.nav-item[data-view="' + id + '"]')) return;
+    var a = document.createElement('a'); a.href = '#' + id; a.className = 'nav-item'; a.setAttribute('data-view', id);
+    a.innerHTML = '<span class="ico">' + ico + '</span> ' + label;
+    var anchor = document.querySelector('.nav-item[data-view="plan"]');
+    if (anchor && anchor.parentNode === nav) nav.insertBefore(a, anchor); else nav.appendChild(a);
+    a.addEventListener('click', function (e) { e.preventDefault(); window.switchView(id); });
+  }
+  var vDnc = mkView('blocklist');
+  mkNav('blocklist', '&#128683;', 'Do-Not-Call');
+
+  var prevSwitch = window.switchView;
+  window.switchView = function (view) {
+    if (view === 'blocklist') {
+      document.querySelectorAll('.view').forEach(function (v) { v.classList.add('hidden'); });
+      if (vDnc) vDnc.classList.remove('hidden');
+      document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.toggle('active', n.getAttribute('data-view') === 'blocklist'); });
+      if (location.hash.replace('#', '') !== 'blocklist') location.hash = 'blocklist';
+      loadDnc(); return;
+    }
+    return prevSwitch.apply(this, arguments);
+  };
+
+  function refreshBadge() {
+    var nav = document.querySelector('.nav-item[data-view="blocklist"]'); if (!nav) return;
+    var c = load().length; var b = nav.querySelector('.v12-b');
+    if (c > 0) { if (!b) { b = document.createElement('span'); b.className = 'v12-b'; b.style.cssText = 'margin-left:6px;font-size:11px;color:var(--muted,#97938c)'; nav.appendChild(b); } b.textContent = '(' + c + ')'; }
+    else if (b) { b.remove(); }
+  }
+
+  function loadDnc() {
+    var l = load();
+    vDnc.innerHTML =
+      '<header class="view-head"><h2>Do-Not-Call list</h2><p class="muted">Numbers here are blocked from dialing - you get a warning before any call. Great for compliance and opt-outs.</p></header>' +
+      '<div class="card"><div class="v12-form">' +
+        '<input id="v12n" placeholder="+9198XXXXXXXX">' +
+        '<input id="v12r" placeholder="Reason (optional) - e.g. asked not to be called">' +
+        '<button class="v12-mini pri" id="v12add">Block number</button>' +
+      '</div><div id="v12list"></div></div>';
+    document.getElementById('v12add').addEventListener('click', function () {
+      var n = document.getElementById('v12n').value.trim(); if (!n) return T('Enter a number');
+      addDnc(n, document.getElementById('v12r').value.trim()); T('Number blocked'); loadDnc();
+    });
+    var host = document.getElementById('v12list');
+    host.innerHTML = l.length ? l.map(function (x) {
+      return '<div class="v12-row"><div><b>' + E(x.num) + '</b>' + (x.reason ? '<div class="m">' + E(x.reason) + '</div>' : '') +
+        '<div class="m">Blocked ' + (x.at ? new Date(x.at).toLocaleDateString() : '') + '</div></div>' +
+        '<button class="v12-mini" data-un="' + E(x.num) + '">Remove</button></div>';
+    }).join('') : '<p class="muted">No blocked numbers. Add one above, or block from any call.</p>';
+    host.querySelectorAll('[data-un]').forEach(function (b) {
+      b.addEventListener('click', function () { var k = d10(b.getAttribute('data-un')); save(load().filter(function (x) { return d10(x.num) !== k; })); loadDnc(); });
+    });
+  }
+
+  /* ---- guard the dialer ---- */
+  var _dispatch = window.dispatchCall;
+  if (typeof _dispatch === 'function') {
+    window.dispatchCall = function () {
+      try {
+        var f = document.getElementById('callNumber');
+        if (f && isDnc(f.value)) {
+          if (!confirm('This number is on your Do-Not-Call list.\n\nCall anyway?')) { T('Call blocked (Do-Not-Call)'); return; }
+        }
+      } catch (e) {}
+      return _dispatch.apply(this, arguments);
+    };
+  }
+
+  /* ---- add a "Block number" action into the call drawer ---- */
+  var _openDrawer = window.openDrawer;
+  if (typeof _openDrawer === 'function') {
+    window.openDrawer = function (log) {
+      var r = _openDrawer.apply(this, arguments);
+      try {
+        var body = document.getElementById('drawerBody');
+        if (body && log && log.to_number && !body.querySelector('.v12-blkwrap')) {
+          var wrap = document.createElement('div'); wrap.className = 'v12-blkwrap'; wrap.style.marginTop = '10px';
+          var blocked = isDnc(log.to_number);
+          wrap.innerHTML = '<button class="v12-mini blk" id="v12blk">' + (blocked ? '&#9989; On Do-Not-Call list' : '&#128683; Add to Do-Not-Call') + '</button>';
+          body.appendChild(wrap);
+          var btn = document.getElementById('v12blk');
+          if (btn && !blocked) btn.addEventListener('click', function () { addDnc(log.to_number, 'Blocked from call log'); btn.innerHTML = '&#9989; On Do-Not-Call list'; btn.disabled = true; T('Added to Do-Not-Call'); });
+        }
+      } catch (e) {}
+      return r;
+    };
+  }
+
+  setTimeout(refreshBadge, 2500);
+})();
+
+
+/* =======================================================================
+ * MNB Omni Caller - v13 layer
+ * Recent-numbers quick-redial on the Place a Call screen + a Help / What's
+ * New center listing every feature and shortcut. Additive, guarded.
+ * ==================================================================== */
+(function () {
+  if (window.__mnbEnhanced13) return; window.__mnbEnhanced13 = true;
+  var T = function (m, ms) { try { toast(m, ms); } catch (e) {} };
+  var E = function (s) { try { return esc(s); } catch (e) { return String(s == null ? '' : s); } };
+  var RKEY = 'mnb_recent_dials';
+
+  var css = document.createElement('style'); css.id = 'mnb-v13-css';
+  css.textContent =
+    '.v13-recent{margin:10px 0 4px}.v13-recent .lbl{font-size:12px;color:var(--muted,#97938c);margin-bottom:6px}' +
+    '.v13-chip{display:inline-block;background:var(--panel-2,#1d1d20);border:1px solid var(--border,#2b2b2f);color:var(--text,#eee);border-radius:20px;padding:6px 12px;font-size:13px;margin:0 6px 6px 0;cursor:pointer}' +
+    '.v13-chip:hover{border-color:var(--accent,#ff7a18);color:var(--accent,#ff7a18)}' +
+    '.v13-help h3{margin:18px 0 8px;font-size:15px}.v13-help .kbd{display:inline-block;background:var(--panel-2,#1d1d20);border:1px solid var(--border,#2b2b2f);border-radius:6px;padding:2px 8px;font-size:12px;font-family:monospace}' +
+    '.v13-feat{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}' +
+    '.v13-fc{background:var(--panel,#141416);border:1px solid var(--border,#2b2b2f);border-radius:12px;padding:14px}' +
+    '.v13-fc b{display:block;margin-bottom:3px}.v13-fc span{color:var(--muted,#97938c);font-size:13px}';
+  document.head.appendChild(css);
+
+  /* ---------------- recent redial ---------------- */
+  function loadR() { try { return JSON.parse(localStorage.getItem(RKEY)) || []; } catch (e) { return []; } }
+  function pushR(num) {
+    num = String(num || '').trim(); if (!num) return;
+    var l = loadR().filter(function (x) { return x !== num; }); l.unshift(num); l = l.slice(0, 8);
+    try { localStorage.setItem(RKEY, JSON.stringify(l)); } catch (e) {}
+  }
+  var _dispatch = window.dispatchCall;
+  if (typeof _dispatch === 'function') {
+    window.dispatchCall = function () {
+      try { var f = document.getElementById('callNumber'); if (f && f.value.trim()) pushR(f.value.trim()); } catch (e) {}
+      return _dispatch.apply(this, arguments);
+    };
+  }
+  function renderRecent() {
+    var input = document.getElementById('callNumber'); if (!input) return;
+    var host = document.getElementById('v13recent');
+    var l = loadR();
+    if (!l.length) { if (host) host.remove(); return; }
+    if (!host) { host = document.createElement('div'); host.id = 'v13recent'; host.className = 'v13-recent'; input.parentNode.insertBefore(host, input.nextSibling); }
+    host.innerHTML = '<div class="lbl">Recent numbers</div>' + l.map(function (n) { return '<span class="v13-chip" data-n="' + E(n) + '">' + E(n) + '</span>'; }).join('');
+    host.querySelectorAll('[data-n]').forEach(function (c) { c.addEventListener('click', function () { input.value = c.getAttribute('data-n'); input.focus(); }); });
+  }
+
+  /* ---------------- Help / What's New center ---------------- */
+  function mkView(id) { var m = document.querySelector('main.main') || (document.getElementById('view-overview') || {}).parentNode; if (!m) return null; var s = document.createElement('section'); s.id = 'view-' + id; s.className = 'view hidden'; m.appendChild(s); return s; }
+  function mkNav(id, ico, label) {
+    var nav = document.querySelector('.sidebar nav') || document.querySelector('nav'); if (!nav || document.querySelector('.nav-item[data-view="' + id + '"]')) return;
+    var a = document.createElement('a'); a.href = '#' + id; a.className = 'nav-item'; a.setAttribute('data-view', id);
+    a.innerHTML = '<span class="ico">' + ico + '</span> ' + label; nav.appendChild(a);
+    a.addEventListener('click', function (e) { e.preventDefault(); window.switchView(id); });
+  }
+  var vHelp = mkView('help');
+  mkNav('help', '&#9432;', 'Help');
+
+  var prevSwitch = window.switchView;
+  window.switchView = function (view) {
+    if (view === 'help') {
+      document.querySelectorAll('.view').forEach(function (v) { v.classList.add('hidden'); });
+      if (vHelp) vHelp.classList.remove('hidden');
+      document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.toggle('active', n.getAttribute('data-view') === 'help'); });
+      if (location.hash.replace('#', '') !== 'help') location.hash = 'help';
+      loadHelp(); return;
+    }
+    var r = prevSwitch.apply(this, arguments);
+    if (view === 'call') setTimeout(renderRecent, 120);
+    return r;
+  };
+
+  var FEATURES = [
+    ['Place a Call', 'Dispatch real AI calls with custom context.'],
+    ['Agent Studio', 'Create and train your own AI agents.'],
+    ['Templates', 'Start an agent from a ready-made vertical blueprint.'],
+    ['Live Calls', 'Watch calls live with transcript + AI read-out.'],
+    ['Call Analytics', 'AI scoring, sentiment, outcomes, coaching, export.'],
+    ['Contacts', 'Saved numbers with one-tap dial (synced to your account).'],
+    ['Follow-ups', 'Flag calls to circle back on, with notes.'],
+    ['Reminders', 'Schedule callbacks with due alerts + desktop notifications.'],
+    ['Do-Not-Call', 'Block numbers; get a warning before dialing them.'],
+    ['Campaigns', 'Bulk outbound with a KPI + progress dashboard.'],
+    ['Export Center', 'Download calls, contacts, follow-ups and analytics.'],
+    ['Integrations', 'WhatsApp, Razorpay, Sheets, Slack, Groq/Gemini (admin).'],
+    ['Personalize', 'Accent colors, light/dark, and a guided tour (gear button).']
+  ];
+  function loadHelp() {
+    vHelp.innerHTML =
+      '<header class="view-head"><h2>Help &amp; What\'s New</h2><p class="muted">Everything MNB Omni Caller can do, and the shortcuts to move fast.</p></header>' +
+      '<div class="card v13-help">' +
+        '<h3>Keyboard shortcuts</h3>' +
+        '<p><span class="kbd">Ctrl / Cmd + K</span> Command palette &nbsp; ' +
+        '<span class="kbd">Ctrl / Cmd + /</span> Spotlight search &nbsp; ' +
+        '<span class="kbd">?</span> Shortcuts help &nbsp; ' +
+        '<span class="kbd">1 - 9</span> Jump to a section</p>' +
+        '<h3 style="margin-top:20px">Everything in your platform</h3>' +
+        '<div class="v13-feat">' + FEATURES.map(function (f) { return '<div class="v13-fc"><b>' + E(f[0]) + '</b><span>' + E(f[1]) + '</span></div>'; }).join('') + '</div>' +
+        '<p class="muted" style="margin-top:18px">Tip: open the <b>&#9881; gear</b> (bottom-right) to change accent colors, toggle light/dark, or replay the product tour.</p>' +
+      '</div>';
+  }
+
+  setTimeout(renderRecent, 1500);
+})();
