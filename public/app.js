@@ -307,6 +307,8 @@ function adminUserRow(u) {
     <div>${numberChecks}</div>
     <label>Monthly minute limit <span class="muted">(0 = unlimited)</span></label>
     <input type="number" id="cap-${u.id}" value="${u.minuteCap}" min="0" style="max-width:160px" />
+    <label>Agent limit <span class="muted">(max agents this client can create)</span></label>
+    <input type="number" id="acap-${u.id}" value="${u.agentCap != null ? u.agentCap : 5}" min="0" style="max-width:160px" />
   </div>`;
 }
 
@@ -314,8 +316,10 @@ async function adminSave(userId, status) {
   const agentIds = [...document.querySelectorAll('.ag-' + userId + ':checked')].map((c) => Number(c.value));
   const numberIds = [...document.querySelectorAll('.num-' + userId + ':checked')].map((c) => Number(c.value));
   const minuteCap = Number($('cap-' + userId).value) || 0;
+  const acEl = $('acap-' + userId);
+  const agentCap = acEl ? (Number(acEl.value) || 0) : undefined;
   try {
-    await api(`/admin/users/${userId}/update`, { method: 'POST', body: { status, agentIds, numberIds, minuteCap } });
+    await api(`/admin/users/${userId}/update`, { method: 'POST', body: { status, agentIds, numberIds, minuteCap, agentCap } });
     toast(status === 'rejected' ? 'Access revoked' : 'Saved');
     loadAdmin();
   } catch (e) { toast('Save failed: ' + e.message, 5000); }
@@ -1914,5 +1918,349 @@ async function detachNumber(numberId) {
         catch (e) { T('Failed: ' + e.message, 4000); }
       });
     });
+  }
+})();
+
+
+/* =======================================================================
+ * MNB Omni Caller - v7 layer
+ * Adds a lightweight CRM to the calling workflow: Contacts + Quick Dial,
+ * a Follow-ups tracker (flag any call, add notes, work the list), and an
+ * Analytics report export/print. All additive and guarded; stored per
+ * browser (localStorage) so nothing touches other users' data.
+ * ==================================================================== */
+(function () {
+  if (window.__mnbEnhanced7) return; window.__mnbEnhanced7 = true;
+  var API = function (p, o) { return api(p, o); };
+  var T = function (m, ms) { try { toast(m, ms); } catch (e) {} };
+  var E = function (s) { try { return esc(s); } catch (e) { return String(s == null ? '' : s); } };
+  var digits = function (s) { return String(s || '').replace(/[^\d]/g, ''); };
+
+  /* ---------- storage helpers (local cache + server sync) ---------- */
+  var meV7 = null;
+  function load(key, def) { try { return JSON.parse(localStorage.getItem(key)) || def; } catch (e) { return def; } }
+  function pushCRM() {
+    if (meV7 && meV7.demo) return; // demo stays local-only
+    try { api('/crm', { method: 'PUT', body: { contacts: load(CKEY, []), followups: load(FKEY, {}) } }); } catch (e) {}
+  }
+  function save(key, val) {
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
+    if (key === CKEY || key === FKEY) pushCRM();
+  }
+  var CKEY = 'mnb_contacts', FKEY = 'mnb_followups';
+  // Pull the server copy on load so Contacts and Follow-ups sync across devices.
+  (function () {
+    api('/me').then(function (info) {
+      meV7 = info && info.user;
+      if (!meV7 || meV7.demo) return;
+      api('/crm').then(function (d) {
+        if (!d) return;
+        try { localStorage.setItem(CKEY, JSON.stringify(d.contacts || [])); localStorage.setItem(FKEY, JSON.stringify(d.followups || {})); } catch (e) {}
+        try { refreshFuBadge(); } catch (e) {}
+        var h = location.hash.replace('#', '');
+        if (h === 'contacts') loadContacts(); else if (h === 'followups') loadFollowups();
+      }).catch(function () {});
+    }).catch(function () {});
+  })();
+
+  /* ---------- styles ---------- */
+  var css = document.createElement('style'); css.id = 'mnb-v7-css';
+  css.textContent =
+    '.v7-form{display:grid;grid-template-columns:1fr 1fr 1.4fr auto;gap:8px;margin-bottom:16px}' +
+    '@media(max-width:720px){.v7-form{grid-template-columns:1fr}}' +
+    '.v7-form input{background:var(--bg,#0e0f12);border:1px solid var(--line,#2b2c34);color:var(--text,#eef);border-radius:9px;padding:10px 12px;font-size:13px}' +
+    '.v7-row{display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid var(--line,#26272e);border-radius:12px;padding:12px 14px;background:var(--card,#15161a);margin-bottom:8px}' +
+    '.v7-row .m{color:var(--muted,#9aa0aa);font-size:12px}' +
+    '.v7-actions{display:flex;gap:6px;flex-wrap:wrap}' +
+    '.v7-mini{border:1px solid var(--line,#2b2c34);background:transparent;color:var(--text,#dfe3ea);border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;font-weight:600}' +
+    '.v7-mini:hover{border-color:#ee6c0a;color:#ee6c0a}' +
+    '.v7-mini.pri{background:linear-gradient(135deg,#ee6c0a,#ffab5e);color:#111;border:none}' +
+    '.v7-mini.wa{border-color:#25D366;color:#25D366}' +
+    '.v7-fu{margin-top:14px;border-top:1px dashed var(--line,#2b2c34);padding-top:12px}' +
+    '.v7-fu label{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text,#dfe3ea);margin-bottom:8px}' +
+    '.v7-fu textarea{width:100%;box-sizing:border-box;background:var(--bg,#0e0f12);border:1px solid var(--line,#2b2c34);color:var(--text,#eef);border-radius:9px;padding:9px 11px;font-size:13px;min-height:56px}' +
+    '.v7-count{display:inline-block;min-width:18px;height:18px;line-height:18px;text-align:center;background:#ee6c0a;color:#111;border-radius:9px;font-size:11px;font-weight:800;margin-left:6px;padding:0 5px}';
+  document.head.appendChild(css);
+
+  /* ---------- view + nav scaffolding ---------- */
+  function mkView(id) {
+    var main = document.querySelector('main.main') || (document.getElementById('view-overview') || {}).parentNode;
+    if (!main) return null;
+    var sec = document.createElement('section'); sec.id = 'view-' + id; sec.className = 'view hidden';
+    main.appendChild(sec); return sec;
+  }
+  function mkNav(id, ico, label, beforeView) {
+    var nav = document.querySelector('.sidebar nav') || document.querySelector('nav');
+    if (!nav || document.querySelector('.nav-item[data-view="' + id + '"]')) return;
+    var a = document.createElement('a'); a.href = '#' + id; a.className = 'nav-item'; a.setAttribute('data-view', id);
+    a.innerHTML = '<span class="ico">' + ico + '</span> ' + label;
+    var anchor = document.querySelector('.nav-item[data-view="' + beforeView + '"]');
+    if (anchor && anchor.parentNode === nav) nav.insertBefore(a, anchor); else nav.appendChild(a);
+    a.addEventListener('click', function (e) { e.preventDefault(); window.switchView(id); });
+  }
+  var vContacts = mkView('contacts'), vFollow = mkView('followups');
+  mkNav('contacts', '&#128100;', 'Contacts', 'plan');
+  mkNav('followups', '&#9873;', 'Follow-ups', 'plan');
+
+  /* ---------- routing (chain on top of existing switchView) ---------- */
+  var MY = { contacts: loadContacts, followups: loadFollowups };
+  var prevSwitch = window.switchView;
+  window.switchView = function (view) {
+    if (MY[view]) {
+      document.querySelectorAll('.view').forEach(function (v) { v.classList.add('hidden'); });
+      var el = document.getElementById('view-' + view); if (el) el.classList.remove('hidden');
+      document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.toggle('active', n.getAttribute('data-view') === view); });
+      if (location.hash.replace('#', '') !== view) location.hash = view;
+      try { MY[view](); } catch (e) { console.error(e); }
+      return;
+    }
+    return prevSwitch.apply(this, arguments);
+  };
+
+  function fuCount() { var f = load(FKEY, {}); return Object.keys(f).filter(function (k) { return !f[k].done; }).length; }
+  function refreshFuBadge() {
+    var nav = document.querySelector('.nav-item[data-view="followups"]'); if (!nav) return;
+    var c = fuCount(); var b = nav.querySelector('.v7-count');
+    if (c > 0) { if (!b) { b = document.createElement('span'); b.className = 'v7-count'; nav.appendChild(b); } b.textContent = c; }
+    else if (b) { b.remove(); }
+  }
+
+  /* ---------- Contacts + Quick Dial ---------- */
+  function loadContacts() {
+    var list = load(CKEY, []);
+    vContacts.innerHTML =
+      '<header class="view-head"><h2>Contacts</h2><p class="muted">Save the numbers you call often and dial them in one tap. Stored privately in this browser.</p></header>' +
+      '<div class="card"><div class="v7-form">' +
+        '<input id="v7cName" placeholder="Name">' +
+        '<input id="v7cNum" placeholder="+9198XXXXXXXX">' +
+        '<input id="v7cNote" placeholder="Note (optional)">' +
+        '<button class="v7-mini pri" id="v7cAdd">Add contact</button>' +
+      '</div><div id="v7cList"></div></div>';
+    document.getElementById('v7cAdd').addEventListener('click', function () {
+      var name = document.getElementById('v7cName').value.trim();
+      var num = document.getElementById('v7cNum').value.trim();
+      if (!name || !num) return T('Add a name and number');
+      var l = load(CKEY, []); l.unshift({ id: Date.now(), name: name, num: num, note: document.getElementById('v7cNote').value.trim() });
+      save(CKEY, l); T('Contact saved'); loadContacts();
+    });
+    renderContacts(list);
+  }
+  function renderContacts(list) {
+    var host = document.getElementById('v7cList'); if (!host) return;
+    if (!list.length) { host.innerHTML = '<p class="muted">No contacts yet. Add your first above.</p>'; return; }
+    host.innerHTML = list.map(function (c) {
+      return '<div class="v7-row"><div><b>' + E(c.name) + '</b> <span class="m">' + E(c.num) + '</span>' +
+        (c.note ? '<div class="m">' + E(c.note) + '</div>' : '') + '</div>' +
+        '<div class="v7-actions">' +
+          '<button class="v7-mini pri" data-dial="' + E(c.num) + '">Dial</button>' +
+          '<a class="v7-mini wa" target="_blank" rel="noopener" href="https://wa.me/' + digits(c.num) + '">WhatsApp</a>' +
+          '<button class="v7-mini" data-del="' + c.id + '">Delete</button>' +
+        '</div></div>';
+    }).join('');
+    host.querySelectorAll('[data-dial]').forEach(function (b) { b.addEventListener('click', function () { quickDial(b.getAttribute('data-dial')); }); });
+    host.querySelectorAll('[data-del]').forEach(function (b) { b.addEventListener('click', function () {
+      save(CKEY, load(CKEY, []).filter(function (c) { return String(c.id) !== b.getAttribute('data-del'); })); loadContacts();
+    }); });
+  }
+  function quickDial(num) {
+    window.switchView('call');
+    setTimeout(function () {
+      var f = document.getElementById('callNumber');
+      if (f) { f.value = num; f.focus(); f.dispatchEvent(new Event('input', { bubbles: true })); T('Number ready - press Place call'); }
+    }, 120);
+  }
+
+  /* ---------- Follow-ups ---------- */
+  function loadFollowups() {
+    var f = load(FKEY, {});
+    var items = Object.keys(f).map(function (k) { return Object.assign({ id: k }, f[k]); })
+      .sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
+    var pending = items.filter(function (i) { return !i.done; });
+    var done = items.filter(function (i) { return i.done; });
+    vFollow.innerHTML =
+      '<header class="view-head"><h2>Follow-ups</h2><p class="muted">Calls you flagged to circle back on. Open any call, tick "Flag for follow-up", and it lands here.</p></header>' +
+      '<div class="card"><h3 style="margin-top:0">Pending (' + pending.length + ')</h3><div id="v7fPending"></div></div>' +
+      (done.length ? '<div class="card" style="margin-top:14px"><h3 style="margin-top:0">Done</h3><div id="v7fDone"></div></div>' : '');
+    renderFu('v7fPending', pending, false);
+    if (done.length) renderFu('v7fDone', done, true);
+    refreshFuBadge();
+  }
+  function renderFu(hostId, arr, isDone) {
+    var host = document.getElementById(hostId); if (!host) return;
+    if (!arr.length) { host.innerHTML = '<p class="muted">Nothing here.</p>'; return; }
+    host.innerHTML = arr.map(function (i) {
+      var when = i.at ? new Date(i.at).toLocaleString() : '';
+      return '<div class="v7-row"><div><b>' + E(i.number || ('Call ' + i.id)) + '</b>' +
+        (i.name ? ' <span class="m">' + E(i.name) + '</span>' : '') +
+        (i.note ? '<div class="m">' + E(i.note) + '</div>' : '') +
+        '<div class="m">' + E(i.time || when) + '</div></div>' +
+        '<div class="v7-actions">' +
+          (i.number ? '<button class="v7-mini pri" data-dial="' + E(i.number) + '">Call</button>' +
+            '<a class="v7-mini wa" target="_blank" rel="noopener" href="https://wa.me/' + digits(i.number) + '">WhatsApp</a>' : '') +
+          (isDone ? '<button class="v7-mini" data-reopen="' + i.id + '">Reopen</button>' : '<button class="v7-mini" data-done="' + i.id + '">Mark done</button>') +
+          '<button class="v7-mini" data-fdel="' + i.id + '">Delete</button>' +
+        '</div></div>';
+    }).join('');
+    host.querySelectorAll('[data-dial]').forEach(function (b) { b.addEventListener('click', function () { quickDial(b.getAttribute('data-dial')); }); });
+    host.querySelectorAll('[data-done]').forEach(function (b) { b.addEventListener('click', function () { setFu(b.getAttribute('data-done'), { done: true }); loadFollowups(); }); });
+    host.querySelectorAll('[data-reopen]').forEach(function (b) { b.addEventListener('click', function () { setFu(b.getAttribute('data-reopen'), { done: false }); loadFollowups(); }); });
+    host.querySelectorAll('[data-fdel]').forEach(function (b) { b.addEventListener('click', function () { var f = load(FKEY, {}); delete f[b.getAttribute('data-fdel')]; save(FKEY, f); loadFollowups(); }); });
+  }
+  function setFu(id, patch) { var f = load(FKEY, {}); f[id] = Object.assign({}, f[id] || {}, patch); save(FKEY, f); refreshFuBadge(); }
+
+  /* ---------- inject follow-up control into the call drawer ---------- */
+  var _openDrawer = window.openDrawer;
+  if (typeof _openDrawer === 'function') {
+    window.openDrawer = function (log) {
+      var r = _openDrawer.apply(this, arguments);
+      try { injectFu(log); } catch (e) {}
+      return r;
+    };
+  }
+  function injectFu(log) {
+    if (!log) return;
+    var body = document.getElementById('drawerBody'); if (!body) return;
+    if (body.querySelector('.v7-fu')) return;
+    var f = load(FKEY, {}); var cur = f[log.id] || {};
+    var box = document.createElement('div'); box.className = 'v7-fu';
+    box.innerHTML =
+      '<label><input type="checkbox" id="v7fFlag" ' + (cur.note !== undefined && !cur.done ? 'checked' : '') + '> Flag this call for follow-up</label>' +
+      '<textarea id="v7fNote" placeholder="Add a note (what to do next)...">' + E(cur.note || '') + '</textarea>' +
+      '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="v7-mini pri" id="v7fSave">Save follow-up</button>' +
+      '<button class="v7-mini" id="v7fSum">&#128172; WhatsApp AI summary</button>' +
+      (log.to_number ? '<a class="v7-mini wa" target="_blank" rel="noopener" href="https://wa.me/' + digits(log.to_number) + '">WhatsApp</a>' : '') + '</div>';
+    body.appendChild(box);
+    var sumBtn = document.getElementById('v7fSum');
+    if (sumBtn) sumBtn.addEventListener('click', async function () {
+      var to = prompt('Send the AI call summary on WhatsApp to (number with country code):', log.to_number || '');
+      if (!to) return;
+      sumBtn.disabled = true; sumBtn.textContent = 'Sending...';
+      try { var r = await api('/calls/' + log.id + '/whatsapp-summary', { method: 'POST', body: { to: to } }); T(r && r.ok ? 'AI summary sent on WhatsApp' : 'Sent'); }
+      catch (e) { T(e.message || 'Could not send', 5000); }
+      finally { sumBtn.disabled = false; sumBtn.innerHTML = '&#128172; WhatsApp AI summary'; }
+    });
+    document.getElementById('v7fSave').addEventListener('click', function () {
+      var flagged = document.getElementById('v7fFlag').checked;
+      var note = document.getElementById('v7fNote').value.trim();
+      var store = load(FKEY, {});
+      if (flagged) {
+        store[log.id] = { number: log.to_number || '', name: log.bot_name || '', time: log.time_of_call || '', note: note, at: Date.now(), done: false };
+        T('Added to Follow-ups');
+      } else { delete store[log.id]; T('Follow-up cleared'); }
+      save(FKEY, store); refreshFuBadge();
+    });
+  }
+
+  /* ---------- Analytics export / print (button injected into analytics view) ---------- */
+  var vAnalytics = document.getElementById('view-analytics');
+  if (vAnalytics) {
+    new MutationObserver(function () {
+      var head = vAnalytics.querySelector('.view-head');
+      if (head && !head.querySelector('#v7expBtn') && !vAnalytics.classList.contains('hidden')) {
+        var b = document.createElement('button'); b.id = 'v7expBtn'; b.className = 'v7-mini pri';
+        b.style.cssText = 'margin-top:10px'; b.textContent = 'Export / print report';
+        b.addEventListener('click', exportReport); head.appendChild(b);
+      }
+    }).observe(vAnalytics, { childList: true, subtree: true });
+  }
+  async function exportReport() {
+    T('Building report...');
+    var o = null; try { o = await API('/analytics/overview'); } catch (e) { return T('Could not build report'); }
+    var sent = o.sentiment || {};
+    var rows = (o.outcomes || []).map(function (x) { return '<tr><td>' + E(x[0].replace(/_/g, ' ')) + '</td><td style="text-align:right">' + x[1] + '</td></tr>'; }).join('');
+    var intents = (o.topIntents || []).map(function (x) { return '<tr><td>' + E(x[0]) + '</td><td style="text-align:right">' + x[1] + '</td></tr>'; }).join('');
+    var html =
+      '<html><head><title>MNB Omni Caller - Call Analytics Report</title><meta charset="utf-8"><style>' +
+      'body{font-family:Segoe UI,Arial,sans-serif;color:#111;padding:32px;max-width:760px;margin:0 auto}' +
+      'h1{color:#ee6c0a;margin:0 0 4px}.sub{color:#666;margin-bottom:22px}' +
+      '.kpis{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:22px}' +
+      '.kpi{border:1px solid #eee;border-radius:12px;padding:14px 18px;min-width:140px}' +
+      '.kpi .n{font-size:26px;font-weight:800}.kpi .l{color:#888;font-size:12px;text-transform:uppercase}' +
+      'table{width:100%;border-collapse:collapse;margin:10px 0 22px}td{padding:8px 6px;border-bottom:1px solid #eee;font-size:14px}' +
+      'h3{margin:18px 0 6px}.foot{color:#999;font-size:12px;border-top:1px solid #eee;padding-top:14px;margin-top:24px}' +
+      '</style></head><body>' +
+      '<h1>Call Analytics Report</h1><div class="sub">MNB Omni Caller by MNB Research &#183; ' + new Date().toLocaleString() + ' &#183; ' + E((o.vertical && o.vertical.name) || 'General') + '</div>' +
+      '<div class="kpis">' +
+        '<div class="kpi"><div class="n">' + (o.avgScore || 0) + '</div><div class="l">Avg score</div></div>' +
+        '<div class="kpi"><div class="n">' + (o.conversion || 0) + '%</div><div class="l">Conversion</div></div>' +
+        '<div class="kpi"><div class="n">' + ((o.totals && o.totals.connected) || 0) + '</div><div class="l">Connected</div></div>' +
+        '<div class="kpi"><div class="n">' + (o.booked || 0) + '</div><div class="l">Booked</div></div>' +
+      '</div>' +
+      '<h3>Sentiment</h3><table><tr><td>Positive</td><td style="text-align:right">' + (sent.positive || 0) + '</td></tr>' +
+      '<tr><td>Neutral</td><td style="text-align:right">' + (sent.neutral || 0) + '</td></tr>' +
+      '<tr><td>Negative</td><td style="text-align:right">' + (sent.negative || 0) + '</td></tr></table>' +
+      '<h3>Outcomes</h3><table>' + (rows || '<tr><td>No data</td><td></td></tr>') + '</table>' +
+      '<h3>Top intents</h3><table>' + (intents || '<tr><td>No data</td><td></td></tr>') + '</table>' +
+      '<div class="foot">Generated by MNB Omni Caller &#183; Shark Tank India featured &#183; DPIIT-recognised</div>' +
+      '<script>window.onload=function(){setTimeout(function(){window.print()},350)}<\/script></body></html>';
+    var w = window.open('', '_blank');
+    if (w) { w.document.write(html); w.document.close(); } else { T('Allow pop-ups to export the report'); }
+  }
+
+  /* keep the follow-up badge fresh on load */
+  refreshFuBadge();
+})();
+
+
+/* =======================================================================
+ * MNB Omni Caller - v8 layer
+ * Bulk-campaign dashboard: an at-a-glance KPI ribbon + progress bars over
+ * the existing Campaigns view. Additive and guarded.
+ * ==================================================================== */
+(function () {
+  if (window.__mnbEnhanced8) return; window.__mnbEnhanced8 = true;
+  var css = document.createElement('style'); css.id = 'mnb-v8-css';
+  css.textContent =
+    '.v8-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:4px 0 18px}' +
+    '.v8-k{background:var(--card,#15161a);border:1px solid var(--line,#26272e);border-radius:14px;padding:16px;text-align:center}' +
+    '.v8-k .n{font-size:26px;font-weight:800;background:linear-gradient(135deg,#ee6c0a,#ffab5e);-webkit-background-clip:text;background-clip:text;color:transparent}' +
+    '.v8-k .l{font-size:12px;color:var(--muted,#9aa0aa);text-transform:uppercase;letter-spacing:.3px;margin-top:4px}' +
+    '.v8-prog{display:flex;flex-direction:column;gap:10px;margin:4px 0 18px}' +
+    '.v8-pc{background:var(--card,#15161a);border:1px solid var(--line,#26272e);border-radius:12px;padding:12px 14px}' +
+    '.v8-pc .top{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13px}' +
+    '.v8-pc .bar{height:8px;border-radius:6px;background:var(--line,#26272e);overflow:hidden;margin-top:8px}' +
+    '.v8-pc .bar>i{display:block;height:100%;background:linear-gradient(90deg,#ee6c0a,#ffab5e)}' +
+    '.v8-pill{font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px}' +
+    '.v8-run{background:rgba(37,208,245,.16);color:#25d0f5}.v8-done{background:rgba(67,224,143,.16);color:#43e08f}.v8-idle{background:rgba(148,163,184,.16);color:#94a3b8}';
+  document.head.appendChild(css);
+
+  function pill(status) {
+    var s = String(status || '').toLowerCase();
+    if (/run|progress|active|live/.test(s)) return '<span class="v8-pill v8-run">' + (status || 'running') + '</span>';
+    if (/complete|done|finish/.test(s)) return '<span class="v8-pill v8-done">' + (status || 'completed') + '</span>';
+    return '<span class="v8-pill v8-idle">' + (status || 'idle') + '</span>';
+  }
+
+  var orig = window.loadCampaigns;
+  if (typeof orig === 'function') {
+    window.loadCampaigns = function () { var r = orig.apply(this, arguments); setTimeout(inject, 450); return r; };
+  }
+
+  async function inject() {
+    var host = document.getElementById('campaignsTable'); if (!host) return;
+    var data; try { data = await api('/campaigns'); } catch (e) { return; }
+    var list = data.bulk_calls || data.campaigns || (Array.isArray(data) ? data : []);
+    var total = list.length;
+    var running = list.filter(function (c) { return /run|progress|active|live/i.test(c.status || ''); }).length;
+    var done = list.filter(function (c) { return /complete|done|finish/i.test(c.status || ''); }).length;
+    var contacts = list.reduce(function (s, c) { return s + (Number(c.total_contacts || c.contacts_count || 0) || 0); }, 0);
+
+    var rib = document.getElementById('v8ribbon'); if (rib) rib.remove();
+    var box = document.createElement('div'); box.id = 'v8ribbon';
+    var k = function (n, l) { return '<div class="v8-k"><div class="n">' + n + '</div><div class="l">' + l + '</div></div>'; };
+    var prog = list.slice(0, 12).map(function (c) {
+      var tot = Number(c.total_contacts || c.contacts_count || 0) || 0;
+      var doneN = Number(c.completed || c.calls_completed || c.done || 0) || 0;
+      var s = String(c.status || '').toLowerCase();
+      var w = tot ? Math.round(doneN / tot * 100) : (/complete|done|finish/.test(s) ? 100 : /run|progress|active|live/.test(s) ? 45 : 0);
+      var nm = (c.name || c.campaign_name || ('Campaign ' + c.id));
+      try { nm = scrub(nm); } catch (e) {}
+      return '<div class="v8-pc"><div class="top"><b>' + nm + '</b>' + pill(c.status) + '</div>' +
+        '<div class="bar"><i style="width:' + w + '%"></i></div>' +
+        '<div style="font-size:12px;color:var(--muted,#9aa0aa);margin-top:6px">' + (tot ? (doneN + ' / ' + tot + ' contacts') : (tot + ' contacts')) + '</div></div>';
+    }).join('');
+    box.innerHTML = '<div class="v8-kpis">' + k(total, 'Campaigns') + k(running, 'Running') + k(done, 'Completed') + k(contacts, 'Total contacts') + '</div>' +
+      (prog ? '<div class="v8-prog">' + prog + '</div>' : '');
+    host.parentNode.insertBefore(box, host);
   }
 })();
