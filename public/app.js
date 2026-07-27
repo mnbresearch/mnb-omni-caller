@@ -2971,3 +2971,331 @@ async function detachNumber(numberId) {
 
   setTimeout(renderRecent, 1500);
 })();
+
+
+/* =======================================================================
+ * MNB Omni Caller - v14 layer
+ * AI Coaching Inbox (aggregated coaching tips across recent calls) +
+ * Overview mission-control ribbon (greeting, live clock, key counters).
+ * Additive, guarded, frontend-only.
+ * ==================================================================== */
+(function () {
+  if (window.__mnbEnhanced14) return; window.__mnbEnhanced14 = true;
+  var T = function (m, ms) { try { toast(m, ms); } catch (e) {} };
+  var E = function (s) { try { return esc(s); } catch (e) { return String(s == null ? '' : s); } };
+
+  var css = document.createElement('style'); css.id = 'mnb-v14-css';
+  css.textContent =
+    '.v14-mc{display:grid;grid-template-columns:1.4fr repeat(4,1fr);gap:12px;margin-bottom:18px}@media(max-width:900px){.v14-mc{grid-template-columns:1fr 1fr}}' +
+    '.v14-hello{background:var(--accent-grad,linear-gradient(135deg,#ff7a18,#ffab5e));color:#111;border-radius:16px;padding:16px 18px}' +
+    '.v14-hello .g{font-size:18px;font-weight:800}.v14-hello .c{font-size:13px;opacity:.85;margin-top:2px}' +
+    '.v14-mk{background:var(--panel,#141416);border:1px solid var(--border,#2b2b2f);border-radius:16px;padding:14px 16px}' +
+    '.v14-mk .n{font-size:24px;font-weight:800}.v14-mk .l{font-size:11px;color:var(--muted,#97938c);text-transform:uppercase;letter-spacing:.3px;margin-top:2px}' +
+    '.v14-mk.due .n{color:#e05d55}' +
+    '.v14-co{border:1px solid var(--border,#2b2b2f);border-radius:14px;padding:16px;margin-bottom:10px;background:var(--panel,#141416)}' +
+    '.v14-co .h{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}' +
+    '.v14-co ul{margin:6px 0 0;padding-left:18px}.v14-co li{margin:3px 0;font-size:14px}' +
+    '.v14-b{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px}' +
+    '.v14-pos{background:rgba(67,185,127,.18);color:#43b97f}.v14-neg{background:rgba(224,93,85,.18);color:#e05d55}.v14-neu{background:rgba(148,163,184,.18);color:#94a3b8}';
+  document.head.appendChild(css);
+
+  function badge(s) { s = (s || 'neutral').toLowerCase(); var c = s === 'positive' ? 'v14-pos' : s === 'negative' ? 'v14-neg' : 'v14-neu'; return '<span class="v14-b ' + c + '">' + E(s) + '</span>'; }
+
+  /* ---------------- Coaching Inbox (new view) ---------------- */
+  function mkView(id) { var m = document.querySelector('main.main') || (document.getElementById('view-overview') || {}).parentNode; if (!m) return null; var s = document.createElement('section'); s.id = 'view-' + id; s.className = 'view hidden'; m.appendChild(s); return s; }
+  function mkNav(id, ico, label, before) {
+    var nav = document.querySelector('.sidebar nav') || document.querySelector('nav'); if (!nav || document.querySelector('.nav-item[data-view="' + id + '"]')) return;
+    var a = document.createElement('a'); a.href = '#' + id; a.className = 'nav-item'; a.setAttribute('data-view', id);
+    a.innerHTML = '<span class="ico">' + ico + '</span> ' + label;
+    var anchor = document.querySelector('.nav-item[data-view="' + before + '"]');
+    if (anchor && anchor.nextSibling) nav.insertBefore(a, anchor.nextSibling); else nav.appendChild(a);
+    a.addEventListener('click', function (e) { e.preventDefault(); window.switchView(id); });
+  }
+  var vCo = mkView('coaching');
+  mkNav('coaching', '&#128161;', 'Coaching', 'analytics');
+
+  var prevSwitch = window.switchView;
+  window.switchView = function (view) {
+    if (view === 'coaching') {
+      document.querySelectorAll('.view').forEach(function (v) { v.classList.add('hidden'); });
+      if (vCo) vCo.classList.remove('hidden');
+      document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.toggle('active', n.getAttribute('data-view') === 'coaching'); });
+      if (location.hash.replace('#', '') !== 'coaching') location.hash = 'coaching';
+      loadCoaching(); return;
+    }
+    var r = prevSwitch.apply(this, arguments);
+    if (view === 'overview') setTimeout(ensureRibbon, 150);
+    return r;
+  };
+
+  async function loadCoaching() {
+    vCo.innerHTML = '<header class="view-head"><h2>AI Coaching Inbox</h2><p class="muted">Concrete, per-call coaching from the AI across your recent conversations - so every call gets better.</p></header><div id="v14co"><p class="muted">Analyzing recent calls...</p></div>';
+    var rows = [];
+    try { var d = await api('/calls/logs?pageno=1&pagesize=20'); rows = (d.call_log_data || []).filter(function (r) { return (r.call_conversation || r.transcript || '').length > 12; }).slice(0, 12); } catch (e) {}
+    if (!rows.length) { document.getElementById('v14co').innerHTML = '<p class="muted">No completed calls with transcripts yet. Place a few calls and coaching will appear here.</p>'; return; }
+    var out = [];
+    for (var i = 0; i < rows.length; i++) {
+      try { var a = await api('/analytics/call/' + rows[i].id); out.push({ log: rows[i], a: a.analysis || {} }); } catch (e) {}
+    }
+    var host = document.getElementById('v14co'); if (!host) return;
+    host.innerHTML = out.map(function (x) {
+      var tips = (x.a.coaching || []).map(function (c) { return '<li>' + E(c) + '</li>'; }).join('');
+      return '<div class="v14-co"><div class="h"><b>' + E(x.log.to_number || ('Call ' + x.log.id)) + '</b>' +
+        '<span>' + badge(x.a.sentiment) + ' <span class="v14-b v14-neu">score ' + (x.a.score || 0) + '</span></span></div>' +
+        '<div class="muted" style="font-size:13px">' + E(x.a.summary || '') + '</div>' +
+        (tips ? '<ul>' + tips + '</ul>' : '') + '</div>';
+    }).join('');
+  }
+
+  /* ---------------- Overview mission-control ribbon ---------------- */
+  var lastRibbon = 0, ribbonCache = null;
+  function greeting() { var h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; }
+  function lsLen(key, filterDone) {
+    try { var v = JSON.parse(localStorage.getItem(key) || (key === 'mnb_followups' ? '{}' : '[]'));
+      if (key === 'mnb_followups') return Object.keys(v).filter(function (k) { return !v[k].done; }).length;
+      if (key === 'mnb_reminders') { var now = Date.now(); return v.filter(function (r) { return !r.done && r.when && r.when <= now; }).length; }
+      return (v || []).length;
+    } catch (e) { return 0; }
+  }
+  function ensureRibbon() {
+    var ov = document.getElementById('view-overview'); if (!ov || ov.classList.contains('hidden')) return;
+    if (document.getElementById('v14ribbon')) { updateClock(); return; }
+    var box = document.createElement('div'); box.id = 'v14ribbon';
+    box.innerHTML = '<div class="v14-mc">' +
+      '<div class="v14-hello"><div class="g" id="v14greet">' + greeting() + '</div><div class="c" id="v14clock"></div></div>' +
+      mk('v14mCalls', 'Recent calls', '') + mk('v14mConn', 'Connected', '') +
+      mk('v14mFu', 'Follow-ups due', ' due') + mk('v14mRem', 'Reminders due', ' due') +
+      '</div>';
+    ov.insertBefore(box, ov.firstChild);
+    updateClock();
+    refreshRibbon();
+    function mk(id, label, cls) { return '<div class="v14-mk' + (cls ? ' due' : '') + '"><div class="n" id="' + id + '">-</div><div class="l">' + label + '</div></div>'; }
+  }
+  function updateClock() { var c = document.getElementById('v14clock'); if (c) c.textContent = new Date().toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }); }
+  async function refreshRibbon() {
+    var now = Date.now(); var total = '-', conn = '-';
+    if (ribbonCache && now - lastRibbon < 60000) { total = ribbonCache.total; conn = ribbonCache.conn; }
+    else {
+      try { var d = await api('/calls/logs?pageno=1&pagesize=100'); var rows = d.call_log_data || [];
+        total = rows.length; conn = rows.filter(function (r) { return String(r.call_status || '').toLowerCase() === 'completed'; }).length;
+        ribbonCache = { total: total, conn: conn }; lastRibbon = now;
+      } catch (e) {}
+    }
+    set('v14mCalls', total); set('v14mConn', conn); set('v14mFu', lsLen('mnb_followups')); set('v14mRem', lsLen('mnb_reminders'));
+    function set(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; }
+  }
+  // keep ribbon present even if Overview re-renders
+  var ovEl = document.getElementById('view-overview');
+  if (ovEl) { new MutationObserver(function () { if (!ovEl.classList.contains('hidden')) setTimeout(ensureRibbon, 60); }).observe(ovEl, { childList: true }); }
+  setInterval(function () { if (document.getElementById('v14ribbon')) { updateClock(); } }, 30000);
+  setTimeout(ensureRibbon, 2000);
+})();
+
+
+/* =======================================================================
+ * MNB Omni Caller - v15 layer
+ * Agent Performance Leaderboard - ranks agents by volume, connect rate,
+ * positive sentiment and average duration. Additive, guarded, frontend-only.
+ * ==================================================================== */
+(function () {
+  if (window.__mnbEnhanced15) return; window.__mnbEnhanced15 = true;
+  var E = function (s) { try { return esc(s); } catch (e) { return String(s == null ? '' : s); } };
+  var SC = function (s) { try { return scrub(s); } catch (e) { return s; } };
+
+  var css = document.createElement('style'); css.id = 'mnb-v15-css';
+  css.textContent =
+    '.v15-tbl{width:100%;border-collapse:collapse}' +
+    '.v15-tbl th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted,#97938c);padding:10px 8px;border-bottom:1px solid var(--border,#2b2b2f)}' +
+    '.v15-tbl td{padding:12px 8px;border-bottom:1px solid rgba(255,255,255,.05);font-size:14px}' +
+    '.v15-rank{font-weight:800;width:34px}' +
+    '.v15-bar{height:7px;border-radius:5px;background:var(--panel-2,#1d1d20);overflow:hidden;margin-top:4px;min-width:80px}' +
+    '.v15-bar>i{display:block;height:100%;background:var(--accent-grad,linear-gradient(90deg,#ff7a18,#ffab5e))}';
+  document.head.appendChild(css);
+
+  function mkView(id) { var m = document.querySelector('main.main') || (document.getElementById('view-overview') || {}).parentNode; if (!m) return null; var s = document.createElement('section'); s.id = 'view-' + id; s.className = 'view hidden'; m.appendChild(s); return s; }
+  function mkNav(id, ico, label, before) {
+    var nav = document.querySelector('.sidebar nav') || document.querySelector('nav'); if (!nav || document.querySelector('.nav-item[data-view="' + id + '"]')) return;
+    var a = document.createElement('a'); a.href = '#' + id; a.className = 'nav-item'; a.setAttribute('data-view', id);
+    a.innerHTML = '<span class="ico">' + ico + '</span> ' + label;
+    var anchor = document.querySelector('.nav-item[data-view="' + before + '"]');
+    if (anchor && anchor.nextSibling) nav.insertBefore(a, anchor.nextSibling); else nav.appendChild(a);
+    a.addEventListener('click', function (e) { e.preventDefault(); window.switchView(id); });
+  }
+  var vLb = mkView('leaderboard');
+  mkNav('leaderboard', '&#127942;', 'Leaderboard', 'coaching');
+
+  var prevSwitch = window.switchView;
+  window.switchView = function (view) {
+    if (view === 'leaderboard') {
+      document.querySelectorAll('.view').forEach(function (v) { v.classList.add('hidden'); });
+      if (vLb) vLb.classList.remove('hidden');
+      document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.toggle('active', n.getAttribute('data-view') === 'leaderboard'); });
+      if (location.hash.replace('#', '') !== 'leaderboard') location.hash = 'leaderboard';
+      loadLb(); return;
+    }
+    return prevSwitch.apply(this, arguments);
+  };
+
+  function dur(d) { if (!d) return 0; var p = String(d).split(':').map(function (x) { return parseFloat(x) || 0; }); return p.length === 2 ? p[0] * 60 + p[1] : p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : 0; }
+  function mmss(s) { s = Math.round(s); var m = Math.floor(s / 60), r = s % 60; return m + ':' + (r < 10 ? '0' : '') + r; }
+
+  async function loadLb() {
+    vLb.innerHTML = '<header class="view-head"><h2>Agent Leaderboard</h2><p class="muted">How each agent is performing across recent calls - ranked by connected conversations.</p></header><div id="v15b"><p class="muted">Crunching the numbers...</p></div>';
+    var rows = [];
+    try { for (var p = 1; p <= 3; p++) { var d = await api('/calls/logs?pageno=' + p + '&pagesize=100'); var r = d.call_log_data || []; rows = rows.concat(r); if (r.length < 100) break; } } catch (e) {}
+    if (!rows.length) { document.getElementById('v15b').innerHTML = '<p class="muted">No calls yet.</p>'; return; }
+    var by = {};
+    rows.forEach(function (l) {
+      var name = SC(l.bot_name || l.agent_name || 'Agent');
+      var a = by[name] || (by[name] = { name: name, calls: 0, conn: 0, pos: 0, secs: 0 });
+      a.calls++;
+      if (String(l.call_status || '').toLowerCase() === 'completed') a.conn++;
+      if (/positive/i.test(l.sentiment_score || '')) a.pos++;
+      a.secs += dur(l.call_duration);
+    });
+    var list = Object.keys(by).map(function (k) { return by[k]; }).sort(function (a, b) { return b.conn - a.conn || b.calls - a.calls; });
+    var max = Math.max.apply(null, list.map(function (a) { return a.conn; }).concat([1]));
+    var medal = ['&#129351;', '&#129352;', '&#129353;'];
+    var body = list.map(function (a, i) {
+      var cr = a.calls ? Math.round(a.conn / a.calls * 100) : 0;
+      var pr = a.conn ? Math.round(a.pos / a.conn * 100) : 0;
+      return '<tr><td class="v15-rank">' + (i < 3 ? medal[i] : (i + 1)) + '</td>' +
+        '<td><b>' + E(a.name) + '</b></td>' +
+        '<td>' + a.calls + '</td>' +
+        '<td>' + a.conn + ' <span class="muted">(' + cr + '%)</span><div class="v15-bar"><i style="width:' + Math.round(a.conn / max * 100) + '%"></i></div></td>' +
+        '<td>' + pr + '%</td>' +
+        '<td>' + mmss(a.calls ? a.secs / a.calls : 0) + '</td></tr>';
+    }).join('');
+    document.getElementById('v15b').innerHTML = '<div class="card"><table class="v15-tbl"><thead><tr><th></th><th>Agent</th><th>Calls</th><th>Connected</th><th>Positive</th><th>Avg length</th></tr></thead><tbody>' + body + '</tbody></table></div>';
+  }
+})();
+
+
+/* =======================================================================
+ * MNB Omni Caller - v16 layer
+ * Contacts CSV / paste bulk import (merges into your synced contacts).
+ * Injected into the Contacts view. Additive, guarded, frontend-only.
+ * ==================================================================== */
+(function () {
+  if (window.__mnbEnhanced16) return; window.__mnbEnhanced16 = true;
+  var T = function (m, ms) { try { toast(m, ms); } catch (e) {} };
+  var CKEY = 'mnb_contacts';
+  var d10 = function (s) { var d = String(s || '').replace(/[^\d]/g, ''); return d.length > 10 ? d.slice(-10) : d; };
+  function load() { try { return JSON.parse(localStorage.getItem(CKEY)) || []; } catch (e) { return []; } }
+  function isDemo() { try { return /demo/i.test(document.getElementById('whoami') && document.getElementById('whoami').textContent || ''); } catch (e) { return false; } }
+
+  var css = document.createElement('style'); css.id = 'mnb-v16-css';
+  css.textContent =
+    '#v16imp textarea{width:100%;box-sizing:border-box;background:var(--bg,#0e0f12);border:1px solid var(--border,#2b2b2f);color:var(--text,#eee);border-radius:9px;padding:10px 12px;font-size:13px;min-height:80px;font-family:monospace}' +
+    '#v16imp .btn2{border:none;border-radius:9px;padding:9px 16px;font-weight:700;font-size:13px;cursor:pointer;background:var(--accent-grad,linear-gradient(135deg,#ff7a18,#ffab5e));color:#111;margin-top:8px}';
+  document.head.appendChild(css);
+
+  function ensureImport() {
+    var view = document.getElementById('view-contacts');
+    if (!view || view.classList.contains('hidden')) return;
+    if (document.getElementById('v16imp')) return;
+    var card = document.createElement('div'); card.className = 'card'; card.id = 'v16imp'; card.style.marginTop = '14px';
+    card.innerHTML = '<h3 style="margin-top:0">Bulk import contacts</h3>' +
+      '<p class="muted" style="margin:0 0 8px">Paste one contact per line: <b>Name, Number, Note</b> (Note optional). CSV pasted from a sheet works too.</p>' +
+      '<textarea id="v16ta" placeholder="Aarav Shah, +919812345678, VIP&#10;Priya, +919876500011"></textarea>' +
+      '<button class="btn2" id="v16go">Import contacts</button> <span class="muted" id="v16msg"></span>';
+    view.appendChild(card);
+    document.getElementById('v16go').addEventListener('click', doImport);
+  }
+
+  function doImport() {
+    var ta = document.getElementById('v16ta'); if (!ta) return;
+    var lines = ta.value.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean);
+    if (!lines.length) return T('Paste some contacts first');
+    var list = load(); var have = {}; list.forEach(function (c) { have[d10(c.num)] = true; });
+    var added = 0;
+    lines.forEach(function (line) {
+      var parts = line.split(/[,\t]/).map(function (x) { return x.trim(); });
+      var name = '', num = '', note = '';
+      // find the part that looks like a number
+      var numIdx = -1;
+      for (var i = 0; i < parts.length; i++) { if ((parts[i].replace(/[^\d]/g, '') || '').length >= 7) { numIdx = i; break; } }
+      if (numIdx === -1) return;
+      num = parts[numIdx];
+      var rest = parts.filter(function (_, i) { return i !== numIdx; });
+      name = rest[0] || ('Contact ' + num.slice(-4));
+      note = rest.slice(1).join(' ');
+      var key = d10(num);
+      if (!key || have[key]) return;
+      have[key] = true; list.unshift({ id: Date.now() + added, name: name, num: num, note: note }); added++;
+    });
+    if (!added) { document.getElementById('v16msg').textContent = 'No new contacts found (duplicates skipped).'; return; }
+    try { localStorage.setItem(CKEY, JSON.stringify(list)); } catch (e) {}
+    if (!isDemo()) { try { api('/crm', { method: 'PUT', body: { contacts: list, followups: JSON.parse(localStorage.getItem('mnb_followups') || '{}') } }); } catch (e) {} }
+    T('Imported ' + added + ' contacts');
+    if (typeof window.switchView === 'function') window.switchView('contacts');
+  }
+
+  var view = document.getElementById('view-contacts');
+  if (view) { new MutationObserver(function () { if (!view.classList.contains('hidden')) setTimeout(ensureImport, 60); }).observe(view, { childList: true }); }
+  var prevSwitch = window.switchView;
+  window.switchView = function (v) { var r = prevSwitch.apply(this, arguments); if (v === 'contacts') setTimeout(ensureImport, 150); return r; };
+})();
+
+
+/* =======================================================================
+ * MNB Omni Caller - v17 layer
+ * Call Snippets library - save reusable context notes and insert them into
+ * a call in one click. Injected on the Place a Call screen. Guarded.
+ * ==================================================================== */
+(function () {
+  if (window.__mnbEnhanced17) return; window.__mnbEnhanced17 = true;
+  var T = function (m, ms) { try { toast(m, ms); } catch (e) {} };
+  var E = function (s) { try { return esc(s); } catch (e) { return String(s == null ? '' : s); } };
+  var KEY = 'mnb_snippets';
+  function load() { try { var v = JSON.parse(localStorage.getItem(KEY)); return v && v.length ? v : DEFAULTS.slice(); } catch (e) { return DEFAULTS.slice(); } }
+  function save(v) { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch (e) {} }
+  var DEFAULTS = [
+    { label: 'Qualify budget', text: 'Ask about their budget range and decision timeline before pitching.' },
+    { label: 'Book a demo', text: 'Offer a free 30-minute demo and confirm a preferred day and time.' },
+    { label: 'Handle objection', text: 'If they hesitate on price, focus on ROI and offer a trial. Never be pushy.' }
+  ];
+
+  var css = document.createElement('style'); css.id = 'mnb-v17-css';
+  css.textContent =
+    '#v17snip{margin:12px 0}#v17snip .lbl{font-size:12px;color:var(--muted,#97938c);margin-bottom:6px}' +
+    '#v17snip .chip{display:inline-flex;align-items:center;gap:6px;background:var(--panel-2,#1d1d20);border:1px solid var(--border,#2b2b2f);color:var(--text,#eee);border-radius:20px;padding:6px 12px;font-size:13px;margin:0 6px 6px 0;cursor:pointer}' +
+    '#v17snip .chip:hover{border-color:var(--accent,#ff7a18)}' +
+    '#v17snip .chip .x{color:var(--muted,#97938c);font-weight:800}#v17snip .chip .x:hover{color:#e05d55}' +
+    '#v17snip .add{border:1px dashed var(--border,#2b2b2f);background:transparent;color:var(--muted,#97938c);border-radius:20px;padding:6px 12px;font-size:13px;cursor:pointer}';
+  document.head.appendChild(css);
+
+  function ensure() {
+    var view = document.getElementById('view-call'); if (!view || view.classList.contains('hidden')) return;
+    var anchor = document.getElementById('contextRows') || document.getElementById('callNumber');
+    if (!anchor) return;
+    var box = document.getElementById('v17snip');
+    if (!box) { box = document.createElement('div'); box.id = 'v17snip'; anchor.parentNode.insertBefore(box, anchor); }
+    render(box);
+  }
+  function render(box) {
+    var l = load();
+    box.innerHTML = '<div class="lbl">Call snippets - click to add as call context</div>' +
+      l.map(function (s, i) { return '<span class="chip" data-i="' + i + '">' + E(s.label) + ' <span class="x" data-del="' + i + '">&#215;</span></span>'; }).join('') +
+      '<button class="add" id="v17add">+ New snippet</button>';
+    box.querySelectorAll('.chip').forEach(function (c) {
+      c.addEventListener('click', function (e) {
+        if (e.target.getAttribute('data-del') != null) { var l2 = load(); l2.splice(Number(e.target.getAttribute('data-del')), 1); save(l2); render(box); return; }
+        var s = load()[Number(c.getAttribute('data-i'))];
+        if (s && typeof window.addContextRow === 'function') { window.addContextRow('Context', s.text); T('Snippet added to call context'); }
+        else T('Open the context section to add snippets');
+      });
+    });
+    document.getElementById('v17add').addEventListener('click', function () {
+      var label = prompt('Snippet label (short):'); if (!label) return;
+      var text = prompt('Snippet text (the context to add to the call):'); if (!text) return;
+      var l3 = load(); l3.push({ label: label.trim(), text: text.trim() }); save(l3); render(box); T('Snippet saved');
+    });
+  }
+
+  var view = document.getElementById('view-call');
+  if (view) { new MutationObserver(function () { if (!view.classList.contains('hidden') && !document.getElementById('v17snip')) setTimeout(ensure, 60); }).observe(view, { childList: true }); }
+  var prevSwitch = window.switchView;
+  window.switchView = function (v) { var r = prevSwitch.apply(this, arguments); if (v === 'call') setTimeout(ensure, 150); return r; };
+  setTimeout(ensure, 1800);
+})();
