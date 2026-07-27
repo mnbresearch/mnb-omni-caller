@@ -14,7 +14,7 @@ const REDIS_KEY = 'mnb:omnicaller:db';
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
-let state = { users: [], sessions: {}, kbOwners: {}, settings: {} };
+let state = { users: [], sessions: {}, kbOwners: {}, settings: {}, userData: {} };
 let redis = null;
 
 function normalize() {
@@ -22,6 +22,7 @@ function normalize() {
   state.sessions ||= {};
   state.kbOwners ||= {};
   state.settings ||= {};
+  state.userData ||= {};
 }
 
 /* ---------- persistence backend ---------- */
@@ -161,6 +162,10 @@ function patchSettings(section, patch) {
   return state.settings[section];
 }
 
+/* ---------- per-user data (CRM: contacts, follow-ups) ---------- */
+function getUserData(userId) { state.userData ||= {}; return state.userData[userId] || (state.userData[userId] = {}); }
+function setUserBucket(userId, key, val) { getUserData(userId)[key] = val; save(); return val; }
+
 /* ---------- bootstrap admin ---------- */
 function ensureAdmin(email, password) {
   if (!email || !password) return;
@@ -195,5 +200,6 @@ module.exports = {
   createSession, getSession, destroySession,
   setKbOwner, getKbOwner, removeKbOwner,
   getSettings, setSettings, patchSettings,
+  getUserData, setUserBucket,
   ensureAdmin, ensureDemo, getDemoUser,
 };

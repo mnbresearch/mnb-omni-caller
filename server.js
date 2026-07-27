@@ -325,12 +325,13 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
   res.json({ users });
 });
 app.post('/api/admin/users/:id/update', adminOnly, (req, res) => {
-  const { status, agentIds, numberIds, minuteCap } = req.body || {};
+  const { status, agentIds, numberIds, minuteCap, agentCap } = req.body || {};
   const patch = {};
   if (status) patch.status = status;
   if (Array.isArray(agentIds)) patch.agentIds = agentIds.map(Number);
   if (Array.isArray(numberIds)) patch.numberIds = numberIds.map(Number);
   if (minuteCap !== undefined) patch.minuteCap = Number(minuteCap) || 0;
+  if (agentCap !== undefined) patch.agentCap = Number(agentCap) || 0;
   const u = db.updateUser(req.params.id, patch);
   if (!u) return res.status(404).json({ error: 'User not found' });
   usageCache.delete(u.id);
@@ -1087,6 +1088,41 @@ app.post('/api/admin/integrations/test/:name', adminOnly, async (req, res) => {
     if (name === 'razorpay') return res.json(await razorpayOrder(100, 'mnb_test_' + Date.now()));
     return res.status(400).json({ error: 'Unknown integration' });
   } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
+});
+
+/* ================= CRM sync (contacts + follow-ups, per user) ========= */
+app.get('/api/crm', (req, res) => {
+  const d = db.getUserData(req.user.id);
+  res.json({ contacts: d.contacts || [], followups: d.followups || {} });
+});
+app.put('/api/crm', (req, res) => {
+  const { contacts, followups } = req.body || {};
+  if (Array.isArray(contacts)) db.setUserBucket(req.user.id, 'contacts', contacts.slice(0, 2000));
+  if (followups && typeof followups === 'object') db.setUserBucket(req.user.id, 'followups', followups);
+  res.json({ ok: true });
+});
+
+/* ================= AI call summary -> WhatsApp ======================== */
+app.post('/api/calls/:id/whatsapp-summary', async (req, res) => {
+  try {
+    const log = await fetchLog(req, req.params.id);
+    if (!log) return res.status(404).json({ error: 'Call not found' });
+    const a = await analyzeCall(log, verticalOf(req.user));
+    const lines = [
+      'MNB Omni Caller - Call summary',
+      log.to_number ? ('Number: ' + log.to_number) : '',
+      'Outcome: ' + String(a.outcome || '').replace(/_/g, ' ') + '  |  Sentiment: ' + (a.sentiment || '') + '  |  Score: ' + (a.score || 0) + '/100',
+      '',
+      a.summary || '',
+      (a.coaching && a.coaching.length) ? ('Next step: ' + a.coaching[0]) : '',
+    ].filter(Boolean);
+    const text = lines.join('\n');
+    const to = (req.body || {}).to || log.to_number;
+    const r = await sendWhatsApp(to, text);
+    if (r.skipped) return res.status(400).json({ error: 'WhatsApp is not configured. Add it in Integrations first.', summary: text });
+    if (!r.ok) return res.status(502).json({ error: r.error || 'WhatsApp send failed', summary: text });
+    res.json({ ok: true, summary: text, to: to });
+  } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
 });
 
 /* ================= Static frontend ================= */
