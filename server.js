@@ -13,12 +13,28 @@ const demo = require('./demo');
 const app = express();
 app.use(express.json({ limit: '30mb' }));
 
+// Serverless-friendly one-time init (Vercel invokes this module per request).
+// The database, admin and demo accounts are set up once, then every request
+// waits on that promise before proceeding.
+let __readyPromise = null;
+function ensureReady() {
+  if (!__readyPromise) {
+    __readyPromise = (async () => {
+      await db.init();
+      db.ensureAdmin(process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD);
+      db.ensureDemo(demo.AGENT_ID);
+    })();
+  }
+  return __readyPromise;
+}
+app.use((req, res, next) => { ensureReady().then(() => next()).catch(next); });
+
 const BASE = process.env.OMNIDIM_API_BASE || 'https://backend.omnidim.io/api/v1';
 const KEY = process.env.OMNIDIM_API_KEY;
 const BRAND = process.env.BRAND_NAME || 'MNB Omni Caller';
 const PORT = process.env.PORT || 3000;
 
-if (!KEY) { console.error('Missing OMNIDIM_API_KEY in .env'); process.exit(1); }
+if (!KEY) { console.error('Missing OMNIDIM_API_KEY'); if (!process.env.VERCEL) process.exit(1); }
 
 /* ================= Auth ================= */
 function getToken(req) {
@@ -1131,12 +1147,12 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'landing.
 app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-(async () => {
-  await db.init();
-  db.ensureAdmin(process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD);
-  db.ensureDemo(demo.AGENT_ID);
-  app.listen(PORT, () => console.log(`${BRAND} running at http://localhost:${PORT}`));
-})();
+// Only start a long-running server when NOT on a serverless platform (Vercel).
+// On Vercel the app is exported and invoked per request instead.
+if (!process.env.VERCEL) {
+  ensureReady().then(() => app.listen(PORT, () => console.log(`${BRAND} running at http://localhost:${PORT}`)));
+}
+module.exports = app;
 
 // Flush the last write to Redis before Render stops the instance.
 process.on('SIGTERM', async () => { await db.flush(); process.exit(0); });
