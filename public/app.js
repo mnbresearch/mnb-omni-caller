@@ -3299,3 +3299,210 @@ async function detachNumber(numberId) {
   window.switchView = function (v) { var r = prevSwitch.apply(this, arguments); if (v === 'call') setTimeout(ensure, 150); return r; };
   setTimeout(ensure, 1800);
 })();
+
+
+/* =======================================================================
+ * MNB Omni Caller - v18 layer
+ * Trends - call volume, connect rate and sentiment over time, drawn on a
+ * lightweight canvas (no libraries). Additive, guarded, frontend-only.
+ * ==================================================================== */
+(function () {
+  if (window.__mnbEnhanced18) return; window.__mnbEnhanced18 = true;
+  var E = function (s) { try { return esc(s); } catch (e) { return String(s == null ? '' : s); } };
+
+  var css = document.createElement('style'); css.id = 'mnb-v18-css';
+  css.textContent =
+    '.v18-k{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}' +
+    '.v18-c{background:var(--panel,#141416);border:1px solid var(--border,#2b2b2f);border-radius:14px;padding:16px}' +
+    '.v18-c .n{font-size:24px;font-weight:800}.v18-c .l{font-size:11px;color:var(--muted,#97938c);text-transform:uppercase;letter-spacing:.3px;margin-top:2px}' +
+    '.v18-chart{background:var(--panel,#141416);border:1px solid var(--border,#2b2b2f);border-radius:14px;padding:16px;margin-bottom:14px}' +
+    '.v18-chart h3{margin:0 0 10px;font-size:15px}';
+  document.head.appendChild(css);
+
+  function mkView(id) { var m = document.querySelector('main.main') || (document.getElementById('view-overview') || {}).parentNode; if (!m) return null; var s = document.createElement('section'); s.id = 'view-' + id; s.className = 'view hidden'; m.appendChild(s); return s; }
+  function mkNav(id, ico, label, before) {
+    var nav = document.querySelector('.sidebar nav') || document.querySelector('nav'); if (!nav || document.querySelector('.nav-item[data-view="' + id + '"]')) return;
+    var a = document.createElement('a'); a.href = '#' + id; a.className = 'nav-item'; a.setAttribute('data-view', id);
+    a.innerHTML = '<span class="ico">' + ico + '</span> ' + label;
+    var anchor = document.querySelector('.nav-item[data-view="' + before + '"]');
+    if (anchor && anchor.nextSibling) nav.insertBefore(a, anchor.nextSibling); else nav.appendChild(a);
+    a.addEventListener('click', function (e) { e.preventDefault(); window.switchView(id); });
+  }
+  var vTr = mkView('trends');
+  mkNav('trends', '&#128200;', 'Trends', 'leaderboard');
+
+  var prevSwitch = window.switchView;
+  window.switchView = function (view) {
+    if (view === 'trends') {
+      document.querySelectorAll('.view').forEach(function (v) { v.classList.add('hidden'); });
+      if (vTr) vTr.classList.remove('hidden');
+      document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.toggle('active', n.getAttribute('data-view') === 'trends'); });
+      if (location.hash.replace('#', '') !== 'trends') location.hash = 'trends';
+      loadTrends(); return;
+    }
+    return prevSwitch.apply(this, arguments);
+  };
+
+  function dayKey(t) {
+    if (!t) return ''; var s = String(t).trim();
+    var m = s.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+    if (m) { var y = m[3].length === 2 ? '20' + m[3] : m[3]; return y + '-' + ('0' + m[1]).slice(-2) + '-' + ('0' + m[2]).slice(-2); }
+    var d = new Date(s); return isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+  }
+  function shortDay(k) { var p = k.split('-'); return p[2] + '/' + p[1]; }
+
+  async function loadTrends() {
+    vTr.innerHTML = '<header class="view-head"><h2>Trends</h2><p class="muted">Call volume, connect rate and sentiment over time.</p></header><div id="v18b"><p class="muted">Building charts...</p></div>';
+    var rows = [];
+    try { for (var p = 1; p <= 3; p++) { var d = await api('/calls/logs?pageno=' + p + '&pagesize=100'); var r = d.call_log_data || []; rows = rows.concat(r); if (r.length < 100) break; } } catch (e) {}
+    if (!rows.length) { document.getElementById('v18b').innerHTML = '<p class="muted">No calls yet.</p>'; return; }
+    var days = {};
+    rows.forEach(function (l) {
+      var k = dayKey(l.time_of_call); if (!k) return;
+      var a = days[k] || (days[k] = { calls: 0, conn: 0, pos: 0 });
+      a.calls++; if (String(l.call_status || '').toLowerCase() === 'completed') a.conn++; if (/positive/i.test(l.sentiment_score || '')) a.pos++;
+    });
+    var keys = Object.keys(days).sort().slice(-14);
+    var total = rows.length, conn = rows.filter(function (l) { return String(l.call_status || '').toLowerCase() === 'completed'; }).length;
+    var pos = rows.filter(function (l) { return /positive/i.test(l.sentiment_score || ''); }).length;
+    var cr = total ? Math.round(conn / total * 100) : 0;
+    document.getElementById('v18b').innerHTML =
+      '<div class="v18-k">' +
+        kc(total, 'Total calls') + kc(conn, 'Connected') + kc(cr + '%', 'Connect rate') + kc(pos, 'Positive') +
+      '</div>' +
+      '<div class="v18-chart"><h3>Calls per day</h3><canvas id="v18cv" height="180"></canvas></div>' +
+      '<div class="v18-chart"><h3>Connect rate per day</h3><canvas id="v18cv2" height="140"></canvas></div>';
+    setTimeout(function () { drawBars('v18cv', keys.map(function (k) { return { x: shortDay(k), y: days[k].calls }; }), '#ff8c3c'); drawBars('v18cv2', keys.map(function (k) { return { x: shortDay(k), y: days[k].calls ? Math.round(days[k].conn / days[k].calls * 100) : 0 }; }), '#43b97f', '%'); }, 60);
+    function kc(n, l) { return '<div class="v18-c"><div class="n">' + n + '</div><div class="l">' + l + '</div></div>'; }
+  }
+
+  function drawBars(id, data, color, suffix) {
+    var cv = document.getElementById(id); if (!cv) return;
+    var W = cv.clientWidth || cv.parentNode.clientWidth - 32; cv.width = W; var H = cv.height;
+    var x = cv.getContext('2d'); x.clearRect(0, 0, W, H);
+    if (!data.length) return;
+    var max = Math.max.apply(null, data.map(function (d) { return d.y; }).concat([1]));
+    var pad = 26, bw = (W - pad) / data.length, gap = bw * 0.28;
+    x.font = '10px system-ui'; x.textAlign = 'center';
+    data.forEach(function (d, i) {
+      var bh = (d.y / max) * (H - 40);
+      var bx = pad / 2 + i * bw + gap / 2, by = H - 22 - bh;
+      var g = x.createLinearGradient(0, by, 0, H - 22); g.addColorStop(0, color); g.addColorStop(1, color + '55');
+      x.fillStyle = g; x.fillRect(bx, by, bw - gap, bh);
+      x.fillStyle = 'rgba(255,255,255,.85)'; x.fillText(d.y + (suffix || ''), bx + (bw - gap) / 2, by - 4);
+      x.fillStyle = 'rgba(255,255,255,.5)'; x.fillText(d.x, bx + (bw - gap) / 2, H - 8);
+    });
+  }
+})();
+
+
+/* =======================================================================
+ * MNB Omni Caller - v19 layer
+ * Contact 360 / Number Lookup - full call history for any number with AI
+ * analysis and quick actions. Additive, guarded, frontend-only.
+ * ==================================================================== */
+(function () {
+  if (window.__mnbEnhanced19) return; window.__mnbEnhanced19 = true;
+  var T = function (m, ms) { try { toast(m, ms); } catch (e) {} };
+  var E = function (s) { try { return esc(s); } catch (e) { return String(s == null ? '' : s); } };
+  var d10 = function (s) { var d = String(s || '').replace(/[^\d]/g, ''); return d.length > 10 ? d.slice(-10) : d; };
+
+  var css = document.createElement('style'); css.id = 'mnb-v19-css';
+  css.textContent =
+    '.v19-search{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}' +
+    '.v19-search input{flex:1;min-width:200px;background:var(--bg,#0e0f12);border:1px solid var(--border,#2b2b2f);color:var(--text,#eee);border-radius:9px;padding:11px 13px;font-size:14px}' +
+    '.v19-search button{border:none;border-radius:9px;padding:11px 18px;font-weight:700;cursor:pointer;background:var(--accent-grad,linear-gradient(135deg,#ff7a18,#ffab5e));color:#111}' +
+    '.v19-tl{position:relative;margin-left:8px;padding-left:20px;border-left:2px solid var(--border,#2b2b2f)}' +
+    '.v19-ev{position:relative;margin-bottom:12px}' +
+    '.v19-ev::before{content:"";position:absolute;left:-27px;top:4px;width:12px;height:12px;border-radius:50%;background:var(--accent,#ff7a18);border:2px solid var(--bg,#0e0f12)}' +
+    '.v19-ev .card2{background:var(--panel,#141416);border:1px solid var(--border,#2b2b2f);border-radius:12px;padding:12px 14px}' +
+    '.v19-b{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px}' +
+    '.v19-pos{background:rgba(67,185,127,.18);color:#43b97f}.v19-neg{background:rgba(224,93,85,.18);color:#e05d55}.v19-neu{background:rgba(148,163,184,.18);color:#94a3b8}' +
+    '.v19-mini{border:1px solid var(--border,#2b2b2f);background:transparent;color:var(--text,#eee);border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;font-weight:600;margin:6px 6px 0 0}' +
+    '.v19-mini:hover{border-color:var(--accent,#ff7a18);color:var(--accent,#ff7a18)}' +
+    '.v19-pick{display:inline-block;background:var(--panel-2,#1d1d20);border:1px solid var(--border,#2b2b2f);border-radius:20px;padding:5px 11px;font-size:12px;margin:0 6px 6px 0;cursor:pointer}';
+  document.head.appendChild(css);
+
+  function badge(s) { s = (s || 'neutral').toLowerCase(); var c = s === 'positive' ? 'v19-pos' : s === 'negative' ? 'v19-neg' : 'v19-neu'; return '<span class="v19-b ' + c + '">' + E(s || 'n/a') + '</span>'; }
+
+  function mkView(id) { var m = document.querySelector('main.main') || (document.getElementById('view-overview') || {}).parentNode; if (!m) return null; var s = document.createElement('section'); s.id = 'view-' + id; s.className = 'view hidden'; m.appendChild(s); return s; }
+  function mkNav(id, ico, label, before) {
+    var nav = document.querySelector('.sidebar nav') || document.querySelector('nav'); if (!nav || document.querySelector('.nav-item[data-view="' + id + '"]')) return;
+    var a = document.createElement('a'); a.href = '#' + id; a.className = 'nav-item'; a.setAttribute('data-view', id);
+    a.innerHTML = '<span class="ico">' + ico + '</span> ' + label;
+    var anchor = document.querySelector('.nav-item[data-view="' + before + '"]');
+    if (anchor && anchor.nextSibling) nav.insertBefore(a, anchor.nextSibling); else nav.appendChild(a);
+    a.addEventListener('click', function (e) { e.preventDefault(); window.switchView(id); });
+  }
+  var vLk = mkView('lookup');
+  mkNav('lookup', '&#128269;', 'Lookup', 'contacts');
+
+  var prevSwitch = window.switchView;
+  window.switchView = function (view) {
+    if (view === 'lookup') {
+      document.querySelectorAll('.view').forEach(function (v) { v.classList.add('hidden'); });
+      if (vLk) vLk.classList.remove('hidden');
+      document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.toggle('active', n.getAttribute('data-view') === 'lookup'); });
+      if (location.hash.replace('#', '') !== 'lookup') location.hash = 'lookup';
+      loadLookup(); return;
+    }
+    return prevSwitch.apply(this, arguments);
+  };
+
+  var cacheLogs = null;
+  function contacts() { try { return JSON.parse(localStorage.getItem('mnb_contacts') || '[]'); } catch (e) { return []; } }
+  function loadLookup() {
+    var picks = contacts().slice(0, 12).map(function (c) { return '<span class="v19-pick" data-n="' + E(c.num) + '">' + E(c.name) + '</span>'; }).join('');
+    vLk.innerHTML =
+      '<header class="view-head"><h2>Contact 360</h2><p class="muted">Look up any number to see its full call history, AI read-outs and quick actions.</p></header>' +
+      '<div class="v19-search"><input id="v19q" placeholder="Enter a phone number..."><button id="v19go">Look up</button></div>' +
+      (picks ? '<div style="margin-bottom:12px"><span class="muted" style="font-size:12px">Your contacts: </span>' + picks + '</div>' : '') +
+      '<div id="v19res"></div>';
+    document.getElementById('v19go').addEventListener('click', function () { run(document.getElementById('v19q').value); });
+    document.getElementById('v19q').addEventListener('keydown', function (e) { if (e.key === 'Enter') run(e.target.value); });
+    vLk.querySelectorAll('[data-n]').forEach(function (p) { p.addEventListener('click', function () { document.getElementById('v19q').value = p.getAttribute('data-n'); run(p.getAttribute('data-n')); }); });
+  }
+
+  async function run(num) {
+    var key = d10(num); if (!key) return T('Enter a number');
+    var res = document.getElementById('v19res'); res.innerHTML = '<p class="muted">Searching call history...</p>';
+    if (!cacheLogs) { cacheLogs = []; try { for (var p = 1; p <= 3; p++) { var d = await api('/calls/logs?pageno=' + p + '&pagesize=100'); var r = d.call_log_data || []; cacheLogs = cacheLogs.concat(r); if (r.length < 100) break; } } catch (e) {} }
+    var hits = cacheLogs.filter(function (l) { return d10(l.to_number) === key || d10(l.from_number) === key; });
+    var c = contacts().filter(function (x) { return d10(x.num) === key; })[0];
+    var digits = key;
+    var header = '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">' +
+      '<div><h3 style="margin:0">' + E(c ? c.name : num) + '</h3><div class="muted">' + E(num) + (c && c.note ? ' - ' + E(c.note) : '') + '</div></div>' +
+      '<div><button class="v19-mini" data-act="call">Call</button>' +
+      '<a class="v19-mini" target="_blank" rel="noopener" href="https://wa.me/' + digits + '">WhatsApp</a>' +
+      '<button class="v19-mini" data-act="remind">Remind</button>' +
+      '<button class="v19-mini" data-act="block">Block</button></div></div>' +
+      '<div class="muted" style="margin:12px 0 8px">' + hits.length + ' call(s) found</div>';
+    if (!hits.length) { res.innerHTML = header + '<p class="muted">No calls to this number yet.</p>'; bindActs(num, digits); return; }
+    hits.sort(function (a, b) { return new Date(b.time_of_call) - new Date(a.time_of_call); });
+    res.innerHTML = header + '<div class="v19-tl">' + hits.map(function (l) {
+      return '<div class="v19-ev"><div class="card2"><div style="display:flex;justify-content:space-between;gap:10px"><b>' + E(l.time_of_call || '') + '</b>' + badge(l.sentiment_score) + '</div>' +
+        '<div class="muted" style="font-size:13px;margin-top:2px">' + E(l.call_status || '') + ' - ' + E(l.call_duration || '0:00') + '</div>' +
+        '<button class="v19-mini" data-an="' + l.id + '">AI analysis</button><div id="v19an_' + l.id + '"></div></div></div>';
+    }).join('') + '</div>';
+    res.querySelectorAll('[data-an]').forEach(function (b) { b.addEventListener('click', function () { analyze(b.getAttribute('data-an')); }); });
+    bindActs(num, digits);
+  }
+  function bindActs(num, digits) {
+    var res = document.getElementById('v19res'); if (!res) return;
+    res.querySelectorAll('[data-act]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var act = b.getAttribute('data-act');
+        if (act === 'call') { window.switchView('call'); setTimeout(function () { var f = document.getElementById('callNumber'); if (f) { f.value = num; f.focus(); } }, 150); }
+        else if (act === 'remind') { var t = prompt('Reminder note for ' + num + ':', 'Call back ' + num); if (!t) return; try { var l = JSON.parse(localStorage.getItem('mnb_reminders') || '[]'); l.push({ id: Date.now(), text: t, num: num, when: Date.now() + 3600000, done: false, notified: false }); localStorage.setItem('mnb_reminders', JSON.stringify(l)); T('Reminder set for 1 hour from now'); } catch (e) {} }
+        else if (act === 'block') { try { var dnc = JSON.parse(localStorage.getItem('mnb_dnc') || '[]'); dnc.unshift({ num: num, reason: 'Blocked from Lookup', at: Date.now() }); localStorage.setItem('mnb_dnc', JSON.stringify(dnc)); T('Added to Do-Not-Call'); } catch (e) {} }
+      });
+    });
+  }
+  async function analyze(id) {
+    var out = document.getElementById('v19an_' + id); if (out) out.innerHTML = '<div class="muted">Analyzing...</div>';
+    try { var d = await api('/analytics/call/' + id); var a = d.analysis || {};
+      var tips = (a.coaching || []).map(function (c) { return '<li>' + E(c) + '</li>'; }).join('');
+      if (out) out.innerHTML = '<div style="margin-top:8px;font-size:13px">' + badge(a.sentiment) + ' <b>score ' + (a.score || 0) + '</b> - ' + E(a.summary || '') + (tips ? '<ul style="margin:6px 0 0;padding-left:18px">' + tips + '</ul>' : '') + '</div>';
+    } catch (e) { if (out) out.innerHTML = '<div class="v19-neg">Analysis failed</div>'; }
+  }
+})();
