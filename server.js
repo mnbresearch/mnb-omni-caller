@@ -92,16 +92,20 @@ const DEMO_URL = process.env.APP_PUBLIC_URL || 'https://mnb-omni-caller.onrender
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const eesc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-async function resendSend({ to, subject, html }) {
-  if (!RESEND_KEY) return; // not configured yet -> skip silently
+const CONTACT_TO = process.env.CONTACT_TO || 'contact@mnbresearch.com';
+
+async function resendSend({ to, subject, html, replyTo }) {
+  if (!RESEND_KEY) return false; // not configured yet -> skip silently
   try {
     const resp = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${RESEND_KEY}` },
-      body: JSON.stringify({ from: MAIL_FROM, to: Array.isArray(to) ? to : [to], reply_to: MAIL_REPLY_TO, subject, html }),
+      body: JSON.stringify({ from: MAIL_FROM, to: Array.isArray(to) ? to : [to], reply_to: replyTo || MAIL_REPLY_TO, subject, html }),
     });
-    if (!resp.ok) console.error('Resend send failed:', resp.status, await resp.text().catch(() => ''));
-  } catch (e) { console.error('Resend error:', e.message); }
+    if (resp.ok) return true;
+    console.error('Resend send failed:', resp.status, await resp.text().catch(() => ''));
+    return false;
+  } catch (e) { console.error('Resend error:', e.message); return false; }
 }
 
 const LOGO_URL = process.env.EMAIL_LOGO_URL || 'https://www.mnbresearch.com/web/image/2429';
@@ -182,6 +186,51 @@ function sendAccessRequestEmails(u) {
   resendSend({ to: u.email, subject: 'We received your access request \u2014 MNB Omni Caller', html: accessEmailShell(reqInner) });
 }
 
+// Contact-form email: notify contact@mnbresearch.com and acknowledge the sender.
+async function sendContactEmail(m) {
+  const when = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
+  const firstName = String(m.name || 'there').trim().split(/\s+/)[0] || 'there';
+  const waDigits = (m.phone || '').replace(/[^\d]/g, '');
+  const btn = (href, label) => `<a href="${href}" style="display:inline-block;background:${OR_GRAD};color:#111;font-weight:700;font-size:14px;text-decoration:none;padding:12px 24px;border-radius:8px">${label}</a>`;
+  const row = (k, v) => v ? `<tr><td style="padding:8px 0;color:#888;font-size:13px;width:130px;vertical-align:top">${k}</td><td style="padding:8px 0;font-size:14px;color:#1a1a1a">${v}</td></tr>` : '';
+
+  // 1) Notification to contact@mnbresearch.com (reply-to goes straight to the sender)
+  const adminInner = `
+    <div style="display:inline-block;background:rgba(238,108,10,.1);color:#c25a08;font-weight:700;font-size:11px;letter-spacing:.6px;text-transform:uppercase;padding:5px 12px;border-radius:20px;margin-bottom:14px">New contact message</div>
+    <p style="margin:0 0 18px;font-size:15px;color:#1a1a1a;line-height:1.6">Someone just sent a message through the website contact form:</p>
+    <table style="width:100%;border-collapse:collapse;border-top:1px solid #f0f0f0">
+      ${row('Name', eesc(m.name || ''))}
+      ${row('Email', `<a href="mailto:${eesc(m.email)}" style="color:#ee6c0a;text-decoration:none">${eesc(m.email)}</a>`)}
+      ${row('Phone', eesc(m.phone || ''))}
+      ${row('Subject', eesc(m.subject || ''))}
+      ${row('Received', eesc(when) + ' IST')}
+    </table>
+    <div style="margin-top:16px;background:#faf7f3;border:1px solid #f0e6da;border-radius:12px;padding:16px 18px">
+      <div style="font-weight:700;font-size:12px;letter-spacing:.6px;text-transform:uppercase;color:#c25a08;margin-bottom:8px">Message</div>
+      <div style="font-size:14px;color:#1a1a1a;line-height:1.65;white-space:pre-wrap">${eesc(m.message || '')}</div>
+    </div>
+    <div style="margin-top:22px">
+      ${btn('mailto:' + eesc(m.email), 'Reply to ' + eesc(firstName))}
+      ${waDigits ? '&nbsp;&nbsp;<a href="https://wa.me/' + waDigits + '" style="display:inline-block;border:1px solid #25D366;color:#128C4B;font-weight:700;font-size:14px;text-decoration:none;padding:11px 22px;border-radius:8px">WhatsApp</a>' : ''}
+    </div>`;
+  const ok = await resendSend({ to: CONTACT_TO, subject: `New contact message \u2014 ${APP_NAME}: ${m.name || m.email}`, html: accessEmailShell(adminInner), replyTo: m.email });
+
+  // 2) Acknowledgement to the sender
+  const ackInner = `
+    <p style="margin:0 0 14px;font-size:16px;color:#1a1a1a">Hi ${eesc(firstName)},</p>
+    <p style="margin:0 0 18px;font-size:15px;color:#3a3a3a;line-height:1.65">Thanks for reaching out to <b>MNB Research</b>. We have received your message and a member of our team will get back to you shortly (usually within one business day).</p>
+    <div style="background:#faf7f3;border:1px solid #f0e6da;border-radius:12px;padding:16px 18px;margin:0 0 22px">
+      <div style="font-weight:700;font-size:12px;letter-spacing:.6px;text-transform:uppercase;color:#c25a08;margin-bottom:8px">Your message</div>
+      <div style="font-size:14px;color:#3a3a3a;line-height:1.65;white-space:pre-wrap">${eesc(m.message || '')}</div>
+    </div>
+    <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.65">In the meantime, feel free to explore the platform live:</p>
+    <div>${btn(eesc(DEMO_URL), '&#9654; View the live demo')}</div>
+    <p style="margin:26px 0 0;font-size:14px;color:#3a3a3a">Warm regards,<br/><b>The MNB Research team</b></p>`;
+  resendSend({ to: m.email, subject: 'We received your message \u2014 MNB Research', html: accessEmailShell(ackInner) });
+
+  return ok;
+}
+
 app.post('/api/auth/signup', (req, res) => {
   const { org, email, password, contact, phone, note } = req.body || {};
   if (!org || !email || !password) return res.status(400).json({ error: 'Organization, email and password are required' });
@@ -192,6 +241,30 @@ app.post('/api/auth/signup', (req, res) => {
   sendAccessRequestEmails(user);  // fire-and-forget Resend emails (admin + requester)
   onNewLead(user);                // fire-and-forget integration fan-out (Sheets/webhook/Slack/WhatsApp)
   res.json({ ok: true, message: 'Thanks! Your request is in. MNB Research will reach out and approve your access shortly.' });
+});
+
+// Public contact form -> emails contact@mnbresearch.com (reply-to the sender) + acks the sender.
+app.post('/api/contact', async (req, res) => {
+  const b = req.body || {};
+  // Honeypot: bots fill hidden "website" field; pretend success and drop.
+  if (b.website) return res.json({ ok: true });
+  const name = String(b.name || '').trim();
+  const email = String(b.email || '').trim();
+  const phone = String(b.phone || '').trim();
+  const subject = String(b.subject || '').trim();
+  const message = String(b.message || '').trim();
+  if (!name || !email || !message) return res.status(400).json({ error: 'Please provide your name, email and a message.' });
+  if (!EMAIL_RE.test(email)) return res.status(400).json({ error: 'Please enter a valid email address.' });
+  if (message.length > 5000 || name.length > 200) return res.status(400).json({ error: 'That message is too long.' });
+  if (!RESEND_KEY) return res.status(503).json({ error: 'Email is not configured yet. Please email contact@mnbresearch.com directly.' });
+  try {
+    const sent = await sendContactEmail({ name, email, phone, subject, message });
+    if (!sent) return res.status(502).json({ error: 'We could not send your message right now. Please try again or email contact@mnbresearch.com.' });
+    res.json({ ok: true, message: 'Thanks! Your message has been sent. We will get back to you shortly.' });
+  } catch (e) {
+    console.error('Contact form error:', e.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again in a moment.' });
+  }
 });
 
 app.post('/api/auth/login', (req, res) => {
