@@ -151,7 +151,7 @@ footer .bot{border-top:1px solid var(--border);padding-top:20px;font-size:.85rem
       <a href="#how">How it works</a>
       <a href="#pricing">Pricing</a>
       <a href="#faq">FAQ</a>
-      <a href="https://www.mnbresearch.com/contactus" target="_blank" rel="noopener">Contact</a>
+      <a href="/contact.html">Contact</a>
     </div>
     <div class="cta">
       <a class="btn ghost" href="#" onclick="mnbDemo();return false">View demo</a>
@@ -308,7 +308,7 @@ footer .bot{border-top:1px solid var(--border);padding-top:20px;font-size:.85rem
       <div>
         <h4>Company</h4>
         <a href="https://www.mnbresearch.com" target="_blank" rel="noopener">MNB Research</a>
-        <a href="https://www.mnbresearch.com/contactus" target="_blank" rel="noopener">Contact us</a>
+        <a href="/contact.html">Contact us</a>
         <a href="https://wa.me/919711488481" target="_blank" rel="noopener">WhatsApp</a>
         <a href="tel:+919711488481">+91 97114 88481</a>
       </div>
@@ -338,5 +338,6 @@ document.getElementById('yr').textContent=new Date().getFullYear();
 const io=new IntersectionObserver((es)=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}),{threshold:.12});
 document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
 </script>
+<script src="/cookie-banner.js" defer></script>
 </body>
 </html>
