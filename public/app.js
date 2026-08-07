@@ -3506,3 +3506,140 @@ async function detachNumber(numberId) {
     } catch (e) { if (out) out.innerHTML = '<div class="v19-neg">Analysis failed</div>'; }
   }
 })();
+
+/* =======================================================================
+ * MNB Omni Caller - v20 layer
+ * Billing / Upgrade - buy call minutes with Cashfree (secure checkout).
+ * Amounts and crediting are enforced server-side; this layer only starts
+ * the hosted checkout and polls order status. Additive, guarded, frontend.
+ * ==================================================================== */
+(function () {
+  if (window.__mnbEnhanced20) return; window.__mnbEnhanced20 = true;
+  var T = function (m, ms) { try { toast(m, ms); } catch (e) {} };
+  var E = function (s) { try { return esc(s); } catch (e) { return String(s == null ? '' : s); } };
+  var CF_SDK = 'https://sdk.cashfree.com/js/v3/cashfree.js';
+
+  var css = document.createElement('style'); css.id = 'mnb-v20-css';
+  css.textContent =
+    '.v20-tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:14px}' +
+    '@media(max-width:900px){.v20-tiers{grid-template-columns:1fr}}' +
+    '.v20-tier{background:var(--panel,#141416);border:1px solid var(--border,#2b2b2f);border-radius:16px;padding:24px;display:flex;flex-direction:column}' +
+    '.v20-tier.pop{border-color:var(--accent,#ff7a18);box-shadow:0 16px 46px rgba(255,122,24,.12);position:relative}' +
+    '.v20-tag{position:absolute;top:-11px;left:50%;transform:translateX(-50%);background:var(--accent-grad,linear-gradient(135deg,#ff7a18,#ffab5e));color:#111;font-weight:800;font-size:11px;padding:4px 12px;border-radius:20px}' +
+    '.v20-tier h3{font-size:18px;margin:0 0 4px}' +
+    '.v20-price{font-size:34px;font-weight:800;margin:6px 0}' +
+    '.v20-price span{font-size:13px;color:var(--muted,#9a958c);font-weight:500}' +
+    '.v20-tier ul{list-style:none;margin:14px 0;padding:0;flex:1}' +
+    '.v20-tier li{padding:6px 0;color:var(--muted,#9a958c);font-size:13.5px;display:flex;gap:9px}' +
+    '.v20-tier li::before{content:"\\2713";color:var(--accent2,#ffab5e);font-weight:800}' +
+    '.v20-buy{border:none;border-radius:10px;padding:13px;font-size:15px;font-weight:700;cursor:pointer;background:var(--accent-grad,linear-gradient(135deg,#ff7a18,#ffab5e));color:#111}' +
+    '.v20-buy:disabled{opacity:.6;cursor:not-allowed}' +
+    '.v20-alt{border:1px solid var(--border,#2b2b2f);background:transparent;color:var(--text,#eee);border-radius:10px;padding:13px;font-size:15px;font-weight:700;cursor:pointer;text-align:center;text-decoration:none;display:block}' +
+    '.v20-note{background:var(--panel-2,#1d1d20);border:1px solid var(--border,#2b2b2f);border-radius:12px;padding:14px 16px;margin-top:16px;color:var(--muted,#9a958c);font-size:13px}' +
+    '.v20-ok{background:rgba(67,185,127,.14);border:1px solid rgba(67,185,127,.4);color:#8fe4b8;border-radius:12px;padding:14px 16px;margin-bottom:14px;font-size:14.5px}';
+  document.head.appendChild(css);
+
+  function mkView(id) { var m = document.querySelector('main.main') || (document.getElementById('view-overview') || {}).parentNode; if (!m) return null; var s = document.createElement('section'); s.id = 'view-' + id; s.className = 'view hidden'; m.appendChild(s); return s; }
+  function mkNav(id, ico, label, before) {
+    var nav = document.querySelector('.sidebar nav') || document.querySelector('nav'); if (!nav || document.querySelector('.nav-item[data-view="' + id + '"]')) return;
+    var a = document.createElement('a'); a.href = '#' + id; a.className = 'nav-item'; a.setAttribute('data-view', id);
+    a.innerHTML = '<span class="ico">' + ico + '</span> ' + label;
+    var anchor = document.querySelector('.nav-item[data-view="' + before + '"]');
+    if (anchor) nav.insertBefore(a, anchor); else nav.appendChild(a);
+    a.addEventListener('click', function (e) { e.preventDefault(); window.switchView(id); });
+  }
+  var vB = mkView('billing');
+  mkNav('billing', '&#128179;', 'Billing', 'overview');
+
+  var prevSwitch = window.switchView;
+  window.switchView = function (view) {
+    if (view === 'billing') {
+      document.querySelectorAll('.view').forEach(function (v) { v.classList.add('hidden'); });
+      if (vB) vB.classList.remove('hidden');
+      document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.toggle('active', n.getAttribute('data-view') === 'billing'); });
+      if (location.hash.replace('#', '') !== 'billing') location.hash = 'billing';
+      loadBilling(); return;
+    }
+    return prevSwitch.apply(this, arguments);
+  };
+
+  var meCache = null, sdkPromise = null;
+  function loadSdk() { if (sdkPromise) return sdkPromise; sdkPromise = new Promise(function (res, rej) { if (window.Cashfree) return res(window.Cashfree); var s = document.createElement('script'); s.src = CF_SDK; s.onload = function () { res(window.Cashfree); }; s.onerror = function () { rej(new Error('sdk')); }; document.head.appendChild(s); }); return sdkPromise; }
+
+  async function getMe() { if (meCache) return meCache; try { meCache = await fetch('/api/me', { cache: 'no-store' }).then(function (r) { return r.json(); }); } catch (e) { meCache = {}; } return meCache; }
+
+  async function loadBilling() {
+    if (!vB) return;
+    vB.innerHTML = '<header class="view-head"><h2>Billing</h2><p class="muted">Top up call minutes for your organization. Secure payments by Cashfree.</p></header><div id="v20body"><p class="muted">Loading plans...</p></div>';
+    var body = document.getElementById('v20body');
+    var meResp = await getMe();
+    var user = (meResp && meResp.user) || {};
+    var pd;
+    try { pd = await fetch('/api/pay/plans').then(function (r) { return r.json(); }); } catch (e) { pd = { plans: [] }; }
+
+    var banner = '';
+    var used = (user.usedMinutes != null) ? user.usedMinutes : null;
+    var cap = (user.minuteCap != null) ? user.minuteCap : null;
+    if (cap != null) banner = '<div class="v20-note" style="margin-top:0;margin-bottom:14px">Your plan: <b style="color:var(--text,#eee)">' + E(user.plan || 'standard') + '</b> &#183; Minutes: <b style="color:var(--text,#eee)">' + (used != null ? E(used) + ' / ' : '') + E(cap) + '</b></div>';
+
+    if (user.demo) { body.innerHTML = banner + '<div class="v20-note">You are exploring the read-only demo. Sign up for your own account to purchase minutes.</div>'; return; }
+    if (!pd || !pd.ready) { body.innerHTML = banner + '<div class="v20-note">Online payments are being set up. To buy minutes now, contact us at <a href="/contact.html" style="color:var(--accent2,#ffab5e)">contact@mnbresearch.com</a> and we will help you right away.</div>'; return; }
+
+    var plans = pd.plans || [];
+    var feat = {
+      starter: ['500 call minutes', '1 trained agent', 'Knowledge base & transcripts', 'Analytics dashboard', 'Email support'],
+      growth: ['1,500 call minutes', 'Up to 5 agents', 'Bulk call campaigns', 'Dedicated phone number', 'Priority support']
+    };
+    var cards = plans.map(function (p) {
+      var pop = p.id === 'growth' ? ' pop' : '';
+      var tag = p.id === 'growth' ? '<span class="v20-tag">MOST POPULAR</span>' : '';
+      var li = (feat[p.id] || [p.minutes + ' call minutes']).map(function (f) { return '<li>' + E(f) + '</li>'; }).join('');
+      return '<div class="v20-tier' + pop + '">' + tag + '<h3>' + E(p.name) + '</h3>' +
+        '<div class="v20-price">&#8377;' + E(Number(p.amount).toLocaleString('en-IN')) + ' <span>one-time</span></div>' +
+        '<ul>' + li + '</ul>' +
+        '<button class="v20-buy" data-plan="' + E(p.id) + '">Buy ' + E(p.name) + '</button></div>';
+    }).join('');
+    // Scale card -> contact
+    cards += '<div class="v20-tier"><h3>Scale</h3><div class="v20-price">Custom</div>' +
+      '<ul><li>Unlimited minutes (fair-use)</li><li>Unlimited agents & numbers</li><li>Multi-client delegation</li><li>Voice cloning & custom flows</li><li>White-glove onboarding</li></ul>' +
+      '<a class="v20-alt" href="/contact.html">Talk to us</a></div>';
+
+    body.innerHTML = banner + '<div class="v20-tiers">' + cards + '</div>' +
+      '<div class="v20-note">Payments are processed securely by Cashfree. Minutes are added to your account automatically once your payment is confirmed. See our <a href="/refund.html" style="color:var(--accent2,#ffab5e)">Refund policy</a>.</div>';
+
+    body.querySelectorAll('.v20-buy').forEach(function (b) { b.addEventListener('click', function () { buy(b.getAttribute('data-plan'), b); }); });
+  }
+
+  async function buy(planId, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Starting...'; }
+    try {
+      var r = await fetch('/api/pay/create-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ planId: planId }) });
+      var j = await r.json().catch(function () { return {}; });
+      if (!r.ok || !j.payment_session_id) { T(j.error || 'Could not start checkout'); if (btn) { btn.disabled = false; btn.textContent = 'Try again'; } return; }
+      var Cashfree = await loadSdk();
+      var cf = Cashfree({ mode: (j.mode === 'sandbox' ? 'sandbox' : 'production') });
+      cf.checkout({ paymentSessionId: j.payment_session_id, redirectTarget: '_self' });
+    } catch (e) { T('Checkout failed to load. Please try again.'); if (btn) { btn.disabled = false; btn.textContent = 'Try again'; } }
+  }
+
+  // On return from Cashfree (return_url carries ?order_id=...), confirm + credit.
+  async function checkReturn() {
+    var q = new URLSearchParams(location.search);
+    var oid = q.get('order_id'); if (!oid) return;
+    // Clean the URL so a refresh does not re-trigger.
+    try { history.replaceState({}, '', location.pathname + '#billing'); } catch (e) {}
+    window.switchView('billing');
+    var body = document.getElementById('v20body');
+    if (body) body.insertAdjacentHTML('afterbegin', '<div class="v20-ok" id="v20ret">Confirming your payment...</div>');
+    var ret = document.getElementById('v20ret');
+    for (var i = 0; i < 6; i++) {
+      try {
+        var s = await fetch('/api/pay/status/' + encodeURIComponent(oid)).then(function (r) { return r.json(); });
+        if (s && s.status === 'PAID') { meCache = null; if (ret) ret.innerHTML = 'Payment successful! ' + (s.minutes || 0) + ' minutes added to your account.'; T('Payment successful'); setTimeout(loadBilling, 1200); return; }
+      } catch (e) {}
+      await new Promise(function (r) { setTimeout(r, 2500); });
+    }
+    if (ret) { ret.className = 'v20-note'; ret.innerHTML = 'We could not confirm the payment yet. If money was debited it will reflect shortly; you can refresh this page.'; }
+  }
+  setTimeout(checkReturn, 800);
+})();
