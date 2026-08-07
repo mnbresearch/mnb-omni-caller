@@ -283,10 +283,19 @@ const CF_BASE = CF_ENV === 'sandbox' ? 'https://sandbox.cashfree.com/pg' : 'http
 const CF_API_VERSION = process.env.CASHFREE_API_VERSION || '2023-08-01';
 const CF_READY = !!(CF_APP_ID && CF_SECRET);
 
-// Server-defined plans. amount is in INR (major units); minutes granted on payment.
+// Pricing model: PREPAID CREDITS. A client buys a pack of call minutes; the
+// minutes are added to their balance (user.minuteCap = total prepaid minutes)
+// and consumed as they call. Nothing resets monthly. The per-minute price is
+// OmniDim's rate plus a fixed markup, so every minute sold is above cost.
+const OMNIDIM_RATE_INR = Number(process.env.OMNIDIM_RATE_INR || 3.5); // your wholesale cost/min
+const PRICE_MARKUP_INR = Number(process.env.PRICE_MARKUP_INR || 2);   // margin added per minute
+const RATE_INR = Math.max(0.5, OMNIDIM_RATE_INR + PRICE_MARKUP_INR);  // client price per minute
+function mkPlan(id, name, minutes, label) {
+  return { id, name, minutes, amount: Math.round(minutes * RATE_INR), currency: 'INR', label };
+}
 const PLANS = {
-  starter: { id: 'starter', name: 'Starter', amount: 1999, minutes: 500,  currency: 'INR', label: 'Starter - 500 call minutes' },
-  growth:  { id: 'growth',  name: 'Growth',  amount: 4999, minutes: 1500, currency: 'INR', label: 'Growth - 1,500 call minutes' },
+  starter: mkPlan('starter', 'Starter', 500,  'Starter - 500 prepaid call minutes'),
+  growth:  mkPlan('growth',  'Growth',  1500, 'Growth - 1,500 prepaid call minutes'),
 };
 
 function cfHeaders() {
@@ -334,6 +343,7 @@ app.get('/api/pay/plans', (req, res) => {
   res.json({
     ready: CF_READY,
     mode: CF_ENV,
+    ratePerMin: RATE_INR,
     plans: Object.values(PLANS).map((p) => ({ id: p.id, name: p.name, amount: p.amount, minutes: p.minutes, currency: p.currency, label: p.label })),
   });
 });
@@ -465,6 +475,7 @@ app.get('/api/me', async (req, res) => {
     user: {
       email: user.email, org: user.org, role: user.role, demo: !!user.demo,
       minuteCap: user.minuteCap, usedMinutes: usage,
+      remainingMinutes: (user.minuteCap && usage != null) ? Math.max(0, Number(user.minuteCap) - usage) : null,
       agentIds: user.agentIds || [], numberIds: user.numberIds || [],
       businessType: user.businessType || 'general',
       agentCap: user.role === 'admin' ? 0 : (user.agentCap || 5),
@@ -545,21 +556,73 @@ function parseDur(d) {
   const p = d.split(':').map((x) => parseFloat(x) || 0);
   return p.length === 2 ? p[0] * 60 + p[1] : p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : 0;
 }
+// Lifetime minutes used by this tenant (prepaid model). Paginates through all
+// call logs for each of the user's agents so heavy users can't slip past the
+// cap. Cached briefly; invalidated right after a call is dispatched.
 async function getUsageMinutes(user) {
   const cached = usageCache.get(user.id);
-  if (cached && Date.now() - cached.at < 60000) return cached.minutes;
-  const now = new Date();
+  if (cached && Date.now() - cached.at < 30000) return cached.minutes;
   let seconds = 0;
-  for (const agentId of user.agentIds) {
-    const { data } = await omni('GET', '/calls/logs', { query: { pageno: 1, pagesize: 150, agentid: agentId } });
-    for (const log of data.call_log_data || []) {
-      const [mm, , yyyy] = String(log.time_of_call || '').split(/[\/ ]/);
-      if (Number(mm) === now.getMonth() + 1 && Number(yyyy) === now.getFullYear()) seconds += parseDur(log.call_duration);
+  for (const agentId of (user.agentIds || [])) {
+    for (let page = 1; page <= 50; page++) {
+      const { data } = await omni('GET', '/calls/logs', { query: { pageno: page, pagesize: 100, agentid: agentId } });
+      const rows = (data && data.call_log_data) || [];
+      for (const log of rows) seconds += parseDur(log.call_duration);
+      if (rows.length < 100) break; // last page
     }
   }
   const minutes = Math.round(seconds / 60);
   usageCache.set(user.id, { at: Date.now(), minutes });
   return minutes;
+}
+function invalidateUsage(userId) { try { usageCache.delete(userId); } catch (e) {} }
+
+// Express guard: block calls when a client's prepaid minute balance is used up.
+async function requireMinutes(req, res, next) {
+  try {
+    if (isAdmin(req)) return next();
+    const cap = Number(req.user.minuteCap) || 0;
+    const used = await getUsageMinutes(req.user).catch(() => 0);
+    if (cap > 0 && used >= cap) {
+      return res.status(403).json({ error: `Your minute balance is used up (${used}/${cap} minutes). Please buy more minutes from the Billing tab to keep calling.` });
+    }
+    checkOmniBudget(); // fire-and-forget low-balance watch on the OmniDim account
+    next();
+  } catch (e) { next(); }
+}
+
+// Low-balance alert for YOUR pooled OmniDim account. Opt-in: set the total
+// minutes you have pre-funded in OMNIDIM_MINUTES_BUDGET. When aggregate client
+// usage crosses 80% / 95%, the admin is emailed once per threshold.
+const OMNIDIM_MINUTES_BUDGET = Number(process.env.OMNIDIM_MINUTES_BUDGET || 0);
+let aggUsageCache = { at: 0, minutes: 0 };
+async function aggregateUsedMinutes() {
+  if (Date.now() - aggUsageCache.at < 600000) return aggUsageCache.minutes;
+  let total = 0;
+  for (const u of db.listUsers()) {
+    if (u.role === 'admin' || u.demo) continue;
+    if (!(u.agentIds && u.agentIds.length)) continue;
+    total += await getUsageMinutes(u).catch(() => 0);
+  }
+  aggUsageCache = { at: Date.now(), minutes: total };
+  return total;
+}
+async function checkOmniBudget() {
+  if (!OMNIDIM_MINUTES_BUDGET) return;
+  try {
+    const used = await aggregateUsedMinutes();
+    const pct = used / OMNIDIM_MINUTES_BUDGET;
+    const level = pct >= 0.95 ? 95 : pct >= 0.8 ? 80 : 0;
+    const s = db.getSettings(); s.omnibudget = s.omnibudget || {};
+    if (level && s.omnibudget.level !== level) {
+      s.omnibudget.level = level; db.setSettings(s);
+      resendSend({
+        to: MAIL_ADMIN,
+        subject: `OmniDim balance alert: ${Math.round(pct * 100)}% of your minute budget used`,
+        html: accessEmailShell(`<p style="font-size:15px;color:#1a1a1a">Heads up - aggregate client usage has reached <b>${used}</b> of your OmniDim budget of <b>${OMNIDIM_MINUTES_BUDGET}</b> minutes (${Math.round(pct * 100)}%).</p><p style="font-size:14px;color:#3a3a3a">Top up your OmniDim balance soon so client calling is not interrupted.</p>`),
+      });
+    } else if (!level && s.omnibudget.level) { s.omnibudget.level = 0; db.setSettings(s); }
+  } catch (e) {}
 }
 
 /* ================= Admin: user management ================= */
@@ -659,11 +722,14 @@ app.post('/api/calls/dispatch', async (req, res) => {
   const agentId = Number((req.body || {}).agent_id);
   if (!ownsAgent(req, agentId)) return res.status(403).json({ error: 'This agent is not assigned to your organization' });
   if (!isAdmin(req)) {
+    const cap = Number(req.user.minuteCap) || 0;
     const used = await getUsageMinutes(req.user).catch(() => 0);
-    if (req.user.minuteCap > 0 && used >= req.user.minuteCap) {
-      return res.status(403).json({ error: `Monthly limit reached (${used}/${req.user.minuteCap} minutes). Contact MNB Research to increase your plan.` });
+    if (cap > 0 && used >= cap) {
+      return res.status(403).json({ error: `Your minute balance is used up (${used}/${cap} minutes). Please buy more minutes from the Billing tab to keep calling.` });
     }
+    checkOmniBudget();
   }
+  invalidateUsage(req.user.id); // count this call fresh on the next check
   return relay('POST', '/calls/dispatch')(req, res);
 });
 
@@ -688,7 +754,7 @@ app.get('/api/calls/logs/:id', relay('GET', (r) => `/calls/logs/${r.params.id}`)
 
 /* ================= Campaigns (scoped) ================= */
 app.get('/api/campaigns', relay('GET', '/calls/bulk_call', { passQuery: true }));
-app.post('/api/campaigns', (req, res, next) => {
+app.post('/api/campaigns', requireMinutes, (req, res, next) => {
   if (!isAdmin(req)) {
     const numId = Number((req.body || {}).phone_number_id);
     if (!req.user.numberIds.includes(numId)) return res.status(403).json({ error: 'This phone number is not assigned to your organization' });
@@ -698,7 +764,7 @@ app.post('/api/campaigns', (req, res, next) => {
 app.get('/api/campaigns/:id', relay('GET', (r) => `/calls/bulk_call/${r.params.id}`));
 app.put('/api/campaigns/:id', relay('PUT', (r) => `/calls/bulk_call/${r.params.id}`));
 app.delete('/api/campaigns/:id', relay('DELETE', (r) => `/calls/bulk_call/${r.params.id}`));
-app.post('/api/campaigns/:id/contact', relay('POST', (r) => `/calls/bulk_call/${r.params.id}/add_contact`));
+app.post('/api/campaigns/:id/contact', requireMinutes, relay('POST', (r) => `/calls/bulk_call/${r.params.id}/add_contact`));
 app.get('/api/campaigns/:id/live', relay('GET', (r) => `/bulk-call/${r.params.id}/live-status`));
 
 /* ================= Knowledge base (per-tenant ownership) ================= */
