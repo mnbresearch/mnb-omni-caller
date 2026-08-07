@@ -287,9 +287,9 @@ const CF_READY = !!(CF_APP_ID && CF_SECRET);
 // minutes are added to their balance (user.minuteCap = total prepaid minutes)
 // and consumed as they call. Nothing resets monthly. The per-minute price is
 // OmniDim's rate plus a fixed markup, so every minute sold is above cost.
-const OMNIDIM_RATE_INR = Number(process.env.OMNIDIM_RATE_INR || 3.5); // your wholesale cost/min
-const PRICE_MARKUP_INR = Number(process.env.PRICE_MARKUP_INR || 2);   // margin added per minute
-const RATE_INR = Math.max(0.5, OMNIDIM_RATE_INR + PRICE_MARKUP_INR);  // client price per minute
+// Client price per minute (INR). Override anytime with the CLIENT_RATE_INR
+// env var - no code change needed. Defaults to Rs 6/min.
+const RATE_INR = Math.max(0.5, Number(process.env.CLIENT_RATE_INR || 6));
 function mkPlan(id, name, minutes, label) {
   return { id, name, minutes, amount: Math.round(minutes * RATE_INR), currency: 'INR', label };
 }
