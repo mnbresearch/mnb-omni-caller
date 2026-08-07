@@ -3580,7 +3580,8 @@ async function detachNumber(numberId) {
     var banner = '';
     var used = (user.usedMinutes != null) ? user.usedMinutes : null;
     var cap = (user.minuteCap != null) ? user.minuteCap : null;
-    if (cap != null) banner = '<div class="v20-note" style="margin-top:0;margin-bottom:14px">Your plan: <b style="color:var(--text,#eee)">' + E(user.plan || 'standard') + '</b> &#183; Minutes: <b style="color:var(--text,#eee)">' + (used != null ? E(used) + ' / ' : '') + E(cap) + '</b></div>';
+    var rem = (user.remainingMinutes != null) ? user.remainingMinutes : ((cap != null && used != null) ? Math.max(0, cap - used) : null);
+    if (cap != null) banner = '<div class="v20-note" style="margin-top:0;margin-bottom:14px">Minute balance: <b style="color:var(--text,#eee)">' + (rem != null ? E(rem) : E(cap)) + ' remaining</b>' + (used != null ? ' &#183; ' + E(used) + ' used of ' + E(cap) + ' purchased' : '') + '</div>';
 
     if (user.demo) { body.innerHTML = banner + '<div class="v20-note">You are exploring the read-only demo. Sign up for your own account to purchase minutes.</div>'; return; }
     if (!pd || !pd.ready) { body.innerHTML = banner + '<div class="v20-note">Online payments are being set up. To buy minutes now, contact us at <a href="/contact.html" style="color:var(--accent2,#ffab5e)">contact@mnbresearch.com</a> and we will help you right away.</div>'; return; }
@@ -3601,7 +3602,7 @@ async function detachNumber(numberId) {
     }).join('');
     // Scale card -> contact
     cards += '<div class="v20-tier"><h3>Scale</h3><div class="v20-price">Custom</div>' +
-      '<ul><li>Unlimited minutes (fair-use)</li><li>Unlimited agents & numbers</li><li>Multi-client delegation</li><li>Voice cloning & custom flows</li><li>White-glove onboarding</li></ul>' +
+      '<ul><li>High-volume minute packs (fair-use)</li><li>Unlimited agents & numbers</li><li>Multi-client delegation</li><li>Voice cloning & custom flows</li><li>White-glove onboarding</li></ul>' +
       '<a class="v20-alt" href="/contact.html">Talk to us</a></div>';
 
     body.innerHTML = banner + '<div class="v20-tiers">' + cards + '</div>' +
