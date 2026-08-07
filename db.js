@@ -14,7 +14,7 @@ const REDIS_KEY = 'mnb:omnicaller:db';
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
-let state = { users: [], sessions: {}, kbOwners: {}, settings: {}, userData: {} };
+let state = { users: [], sessions: {}, kbOwners: {}, settings: {}, userData: {}, orders: {} };
 let redis = null;
 
 function normalize() {
@@ -23,6 +23,7 @@ function normalize() {
   state.kbOwners ||= {};
   state.settings ||= {};
   state.userData ||= {};
+  state.orders ||= {};
 }
 
 /* ---------- persistence backend ---------- */
@@ -166,6 +167,21 @@ function patchSettings(section, patch) {
 function getUserData(userId) { state.userData ||= {}; return state.userData[userId] || (state.userData[userId] = {}); }
 function setUserBucket(userId, key, val) { getUserData(userId)[key] = val; save(); return val; }
 
+/* ---------- payment orders (Cashfree) ----------
+ * Stores one record per created order so payments can be reconciled and
+ * credited exactly once. No card data is ever stored here - only our own
+ * order id, the plan, amount, the owning user, and the status. */
+function saveOrder(order) {
+  if (!order || !order.orderId) return null;
+  state.orders ||= {};
+  state.orders[order.orderId] = order;
+  save();
+  return order;
+}
+function getOrder(orderId) { return (state.orders || {})[String(orderId)] || null; }
+function listOrders() { return Object.values(state.orders || {}); }
+function listOrdersByUser(userId) { return listOrders().filter((o) => o.userId === userId); }
+
 /* ---------- bootstrap admin ---------- */
 function ensureAdmin(email, password) {
   if (!email || !password) return;
@@ -201,5 +217,6 @@ module.exports = {
   setKbOwner, getKbOwner, removeKbOwner,
   getSettings, setSettings, patchSettings,
   getUserData, setUserBucket,
+  saveOrder, getOrder, listOrders, listOrdersByUser,
   ensureAdmin, ensureDemo, getDemoUser,
 };

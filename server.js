@@ -11,7 +11,9 @@ const db = require('./db');
 const demo = require('./demo');
 
 const app = express();
-app.use(express.json({ limit: '30mb' }));
+const crypto = require('crypto');
+// Capture the raw request body so we can verify payment-webhook signatures.
+app.use(express.json({ limit: '30mb', verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
 // Serverless-friendly one-time init (Vercel invokes this module per request).
 // The database, admin and demo accounts are set up once, then every request
@@ -264,6 +266,163 @@ app.post('/api/contact', async (req, res) => {
   } catch (e) {
     console.error('Contact form error:', e.message);
     res.status(500).json({ error: 'Something went wrong. Please try again in a moment.' });
+  }
+});
+
+/* ===================== Cashfree Payments =====================
+ * Secure server-side checkout. The secret key lives ONLY in the
+ * CASHFREE_SECRET_KEY env var - never in client code or the repo.
+ * Prices come from the server-side PLANS catalog, so a client can never
+ * choose the amount. Payments are confirmed server-side (order status +
+ * HMAC-signed webhook) before minutes are credited, and crediting happens
+ * exactly once per order. No card data is ever handled by this server. */
+const CF_APP_ID = process.env.CASHFREE_APP_ID || '';
+const CF_SECRET = process.env.CASHFREE_SECRET_KEY || '';
+const CF_ENV = (process.env.CASHFREE_ENV || 'production').toLowerCase();
+const CF_BASE = CF_ENV === 'sandbox' ? 'https://sandbox.cashfree.com/pg' : 'https://api.cashfree.com/pg';
+const CF_API_VERSION = process.env.CASHFREE_API_VERSION || '2023-08-01';
+const CF_READY = !!(CF_APP_ID && CF_SECRET);
+
+// Server-defined plans. amount is in INR (major units); minutes granted on payment.
+const PLANS = {
+  starter: { id: 'starter', name: 'Starter', amount: 1999, minutes: 500,  currency: 'INR', label: 'Starter - 500 call minutes' },
+  growth:  { id: 'growth',  name: 'Growth',  amount: 4999, minutes: 1500, currency: 'INR', label: 'Growth - 1,500 call minutes' },
+};
+
+function cfHeaders() {
+  return {
+    'Content-Type': 'application/json',
+    'x-api-version': CF_API_VERSION,
+    'x-client-id': CF_APP_ID,
+    'x-client-secret': CF_SECRET,
+  };
+}
+
+// Grant the plan's minutes to the buyer exactly once.
+function creditOrderOnce(order) {
+  if (!order || order.credited) return order;
+  const plan = PLANS[order.planId];
+  const user = db.findUserById(order.userId);
+  if (!plan || !user) return order;
+  const addMin = plan.minutes || 0;
+  db.updateUser(user.id, {
+    minuteCap: (Number(user.minuteCap) || 0) + addMin,
+    plan: plan.id,
+    lastPaymentAt: new Date().toISOString(),
+    status: user.status === 'pending' ? 'active' : user.status,
+  });
+  order.credited = true;
+  order.status = 'PAID';
+  order.creditedAt = new Date().toISOString();
+  db.saveOrder(order);
+  try {
+    resendSend({
+      to: MAIL_ADMIN,
+      subject: `Payment received - ${plan.name}: ${user.contact || user.org || user.email}`,
+      html: accessEmailShell(`<p style="font-size:15px;color:#1a1a1a">A payment was completed on ${APP_NAME}.</p>
+        <p style="font-size:14px;color:#1a1a1a">Plan: <b>${eesc(plan.name)}</b> (${eesc(plan.currency)} ${eesc(String(plan.amount))})<br>
+        Minutes added: <b>${addMin}</b><br>
+        Customer: ${eesc(user.contact || '')} &lt;${eesc(user.email)}&gt;<br>
+        Order: ${eesc(order.orderId)}</p>`),
+    });
+  } catch (e) {}
+  return order;
+}
+
+// Public plan catalog (no secrets leave the server).
+app.get('/api/pay/plans', (req, res) => {
+  res.json({
+    ready: CF_READY,
+    mode: CF_ENV,
+    plans: Object.values(PLANS).map((p) => ({ id: p.id, name: p.name, amount: p.amount, minutes: p.minutes, currency: p.currency, label: p.label })),
+  });
+});
+
+// Create a Cashfree order for the logged-in user. Amount is set server-side.
+app.post('/api/pay/create-order', async (req, res) => {
+  const user = currentUser(req);
+  if (!user) return res.status(401).json({ error: 'Please sign in to make a purchase.' });
+  if (user.demo) return res.status(403).json({ error: 'The demo account cannot make purchases.' });
+  if (!CF_READY) return res.status(503).json({ error: 'Payments are not configured yet. Please contact support.' });
+  const plan = PLANS[String((req.body || {}).planId || '')];
+  if (!plan) return res.status(400).json({ error: 'Unknown plan.' });
+
+  const phone = String((req.body || {}).phone || user.phone || '').replace(/[^\d]/g, '').slice(-10);
+  const orderId = 'mnb_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
+  const base = (DEMO_URL || '').replace(/\/$/, '');
+  const payload = {
+    order_id: orderId,
+    order_amount: plan.amount,
+    order_currency: plan.currency,
+    customer_details: {
+      customer_id: 'u_' + user.id,
+      customer_name: String(user.contact || user.org || 'MNB Customer').slice(0, 100),
+      customer_email: user.email,
+      customer_phone: phone.length >= 10 ? phone : '9999999999',
+    },
+    order_meta: {
+      return_url: `${base}/app?order_id={order_id}`,
+      notify_url: `${base}/api/pay/webhook`,
+    },
+    order_note: plan.label,
+  };
+  try {
+    const resp = await fetch(`${CF_BASE}/orders`, { method: 'POST', headers: cfHeaders(), body: JSON.stringify(payload) });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.payment_session_id) {
+      console.error('Cashfree create-order failed:', resp.status, data && data.message);
+      return res.status(502).json({ error: (data && data.message) || 'Could not start the payment. Please try again.' });
+    }
+    db.saveOrder({ orderId, userId: user.id, planId: plan.id, amount: plan.amount, currency: plan.currency, minutes: plan.minutes, status: 'CREATED', credited: false, createdAt: new Date().toISOString() });
+    res.json({ ok: true, order_id: orderId, payment_session_id: data.payment_session_id, mode: CF_ENV });
+  } catch (e) {
+    console.error('Cashfree create-order error:', e.message);
+    res.status(500).json({ error: 'Payment service is unavailable right now. Please try again.' });
+  }
+});
+
+// Verify an order server-side and credit minutes if paid (idempotent).
+app.get('/api/pay/status/:orderId', async (req, res) => {
+  const user = currentUser(req);
+  if (!user) return res.status(401).json({ error: 'Please sign in.' });
+  const order = db.getOrder(req.params.orderId);
+  if (!order || order.userId !== user.id) return res.status(404).json({ error: 'Order not found.' });
+  if (!CF_READY) return res.status(503).json({ error: 'Payments are not configured.' });
+  try {
+    const resp = await fetch(`${CF_BASE}/orders/${encodeURIComponent(order.orderId)}`, { headers: cfHeaders() });
+    const data = await resp.json().catch(() => ({}));
+    const paid = !!(data && data.order_status === 'PAID');
+    if (paid) creditOrderOnce(order);
+    res.json({ ok: true, status: paid ? 'PAID' : (data && data.order_status) || order.status, credited: !!order.credited, minutes: order.minutes });
+  } catch (e) {
+    console.error('Cashfree status error:', e.message);
+    res.status(500).json({ error: 'Could not check payment status.' });
+  }
+});
+
+// Cashfree webhook - HMAC-signature verified, credits idempotently.
+app.post('/api/pay/webhook', (req, res) => {
+  try {
+    if (!CF_SECRET) return res.status(503).end();
+    const signature = req.get('x-webhook-signature') || '';
+    const timestamp = req.get('x-webhook-timestamp') || '';
+    const raw = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body || {});
+    const expected = crypto.createHmac('sha256', CF_SECRET).update(timestamp + raw).digest('base64');
+    const a = Buffer.from(signature); const b = Buffer.from(expected);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      console.error('Cashfree webhook: signature mismatch');
+      return res.status(401).end();
+    }
+    const body = req.body || {};
+    const orderId = body && body.data && body.data.order && body.data.order.order_id;
+    if (orderId && /PAYMENT_SUCCESS/i.test(String(body.type || ''))) {
+      const order = db.getOrder(orderId);
+      if (order) creditOrderOnce(order);
+    }
+    res.status(200).json({ ok: true });
+  } catch (e) {
+    console.error('Cashfree webhook error:', e.message);
+    res.status(200).json({ ok: true });
   }
 });
 
