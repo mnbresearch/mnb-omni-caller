@@ -862,7 +862,7 @@ async function campaignGuard(req, res, next) {
 app.post('/api/campaigns', requireMinutes, (req, res, next) => {
   if (!isAdmin(req)) {
     const numId = Number((req.body || {}).phone_number_id);
-    if (!req.user.numberIds.includes(numId)) return res.status(403).json({ error: 'This phone number is not assigned to your organization' });
+    if (!req.user.numberIds.includes(numId)) return res.status(403).json({ error: 'This phone number is not assigned to your organization' }); const agId = Number((req.body||{}).agent_id ?? (req.body||{}).bot_id); if (agId && !req.user.agentIds.map(Number).includes(agId)) return res.status(403).json({ error: 'This agent is not assigned to your organization' });
   }
   next();
 }, relay('POST', '/calls/bulk_call/create'));
@@ -1541,7 +1541,7 @@ app.post('/api/calls/:id/whatsapp-summary', async (req, res) => {
       (a.coaching && a.coaching.length) ? ('Next step: ' + a.coaching[0]) : '',
     ].filter(Boolean);
     const text = lines.join('\n');
-    const to = (req.body || {}).to || log.to_number;
+    const to = log.to_number;
     const r = await sendWhatsApp(to, text);
     if (r.skipped) return res.status(400).json({ error: 'WhatsApp is not configured. Add it in Integrations first.', summary: text });
     if (!r.ok) return res.status(502).json({ error: r.error || 'WhatsApp send failed', summary: text });
