@@ -549,6 +549,83 @@ function relay(method, upstreamPathFn, opts = {}) {
   };
 }
 
+/* ================= Multi-tenant ownership guards =================
+ * The whole platform shares ONE OmniDim account, so every call log, recording
+ * and campaign lives in the same upstream namespace. Without an explicit
+ * per-tenant check, any signed-in client could read (or edit/delete) another
+ * client's data just by changing an id in the URL. These helpers scope access
+ * to the agents each client actually owns (req.user.agentIds). Admins bypass.
+ */
+
+// The client's own agents as {id, name}, cached briefly. Used to scope campaigns.
+const _agentsCache = new Map(); // userId -> {at, agents}
+async function ownedAgents(req) {
+  const c = _agentsCache.get(req.user.id);
+  if (c && Date.now() - c.at < 60000) return c.agents;
+  let agents = [];
+  try {
+    const { status, data } = await omni('GET', '/agents', { query: { pageno: 1, pagesize: 150 } });
+    if (status === 200) {
+      const ids = new Set((req.user.agentIds || []).map(Number));
+      agents = ((data && data.bots) || [])
+        .filter((b) => ids.has(Number(b.id)))
+        .map((b) => ({ id: Number(b.id), name: String(b.name || '').trim().toLowerCase() }));
+    }
+  } catch (e) {}
+  _agentsCache.set(req.user.id, { at: Date.now(), agents });
+  return agents;
+}
+function _objAgentId(o) {
+  return Number((o && (o.bot_id ?? o.agent_id ?? o.agentid ?? o.botId ?? o.agentId)) ?? NaN);
+}
+// Does a campaign/record object belong to this client? (by agent id or bot_name)
+async function campaignOwned(req, obj) {
+  if (isAdmin(req)) return true;
+  if (!obj) return false;
+  const id = _objAgentId(obj);
+  if (id && (req.user.agentIds || []).map(Number).includes(id)) return true;
+  const name = String(obj.bot_name || obj.agent_name || '').trim().toLowerCase();
+  if (!name) return false;
+  return (await ownedAgents(req)).some((a) => a.name === name);
+}
+
+// Definitive index of the call ids + recording ids that belong to this client,
+// built by listing the logs of each of their agents (a call is owned iff it
+// appears under one of the client's agents). Cached briefly; cleared on dispatch.
+const _callIndexCache = new Map(); // userId -> {at, callIds, recIds}
+async function ownedCallIndex(req) {
+  const c = _callIndexCache.get(req.user.id);
+  if (c && Date.now() - c.at < 60000) return c;
+  const callIds = new Set(), recIds = new Set();
+  for (const agentId of (req.user.agentIds || [])) {
+    for (let page = 1; page <= 20; page++) {
+      let rows = [];
+      try {
+        const { data } = await omni('GET', '/calls/logs', { query: { pageno: page, pagesize: 100, agentid: agentId } });
+        rows = (data && data.call_log_data) || [];
+      } catch (e) { break; }
+      for (const l of rows) {
+        if (l && l.id != null) callIds.add(String(l.id));
+        const m = /\/recording\/([^/?]+)/.exec(String((l && l.recording_url) || ''));
+        if (m) recIds.add(m[1]);
+        if (l && l.recording_id != null) recIds.add(String(l.recording_id));
+      }
+      if (rows.length < 100) break; // last page
+    }
+  }
+  const idx = { at: Date.now(), callIds, recIds };
+  _callIndexCache.set(req.user.id, idx);
+  return idx;
+}
+async function userOwnsCall(req, id) {
+  if (isAdmin(req)) return true;
+  try { return (await ownedCallIndex(req)).callIds.has(String(id)); } catch (e) { return false; }
+}
+async function userOwnsRecording(req, id) {
+  if (isAdmin(req)) return true;
+  try { return (await ownedCallIndex(req)).recIds.has(String(id)); } catch (e) { return false; }
+}
+
 /* ================= Usage tracking (minutes per client, current month) ================= */
 const usageCache = new Map(); // userId -> {at, minutes}
 function parseDur(d) {
@@ -575,7 +652,7 @@ async function getUsageMinutes(user) {
   usageCache.set(user.id, { at: Date.now(), minutes });
   return minutes;
 }
-function invalidateUsage(userId) { try { usageCache.delete(userId); } catch (e) {} }
+function invalidateUsage(userId) { try { usageCache.delete(userId); _callIndexCache.delete(userId); } catch (e) {} }
 
 // Express guard: block calls when a client's prepaid minute balance is used up.
 async function requireMinutes(req, res, next) {
@@ -750,10 +827,38 @@ app.get('/api/calls/logs', async (req, res) => {
     res.json({ call_log_data: all.slice((page - 1) * size, page * size), total_records: all.length });
   } catch (e) { res.status(502).json({ error: 'Upstream request failed' }); }
 });
-app.get('/api/calls/logs/:id', relay('GET', (r) => `/calls/logs/${r.params.id}`));
+app.get('/api/calls/logs/:id', async (req, res) => {
+  const log = await fetchLog(req, req.params.id); // ownership enforced inside fetchLog
+  if (!log) return res.status(404).json({ error: 'Call not found' });
+  res.json(log);
+});
 
 /* ================= Campaigns (scoped) ================= */
-app.get('/api/campaigns', relay('GET', '/calls/bulk_call', { passQuery: true }));
+// List: admins see everything; clients see only campaigns run by their agents.
+app.get('/api/campaigns', async (req, res) => {
+  try {
+    const { status, data } = await omni('GET', '/calls/bulk_call', { query: req.query });
+    if (status !== 200) return res.status(status).json(data);
+    if (isAdmin(req)) return res.json(data);
+    const list = data.records || data.bulk_calls || [];
+    const kept = [];
+    for (const c of list) if (await campaignOwned(req, c)) kept.push(c);
+    res.json(Object.assign({}, data, { records: kept, bulk_calls: kept }));
+  } catch (e) { res.status(502).json({ error: 'Upstream request failed' }); }
+});
+// Guard every by-id campaign action so a client can't read/edit/delete another's.
+async function campaignGuard(req, res, next) {
+  if (isAdmin(req)) return next();
+  try {
+    const { status, data } = await omni('GET', `/calls/bulk_call/${req.params.id}`);
+    if (status !== 200 || !data) return res.status(404).json({ error: 'Campaign not found' });
+    const camp = data.bulk_call || data.record || data.data || data;
+    if (!(await campaignOwned(req, camp))) {
+      return res.status(403).json({ error: 'This campaign is not assigned to your organization' });
+    }
+    next();
+  } catch (e) { res.status(502).json({ error: 'Upstream request failed' }); }
+}
 app.post('/api/campaigns', requireMinutes, (req, res, next) => {
   if (!isAdmin(req)) {
     const numId = Number((req.body || {}).phone_number_id);
@@ -761,11 +866,11 @@ app.post('/api/campaigns', requireMinutes, (req, res, next) => {
   }
   next();
 }, relay('POST', '/calls/bulk_call/create'));
-app.get('/api/campaigns/:id', relay('GET', (r) => `/calls/bulk_call/${r.params.id}`));
-app.put('/api/campaigns/:id', relay('PUT', (r) => `/calls/bulk_call/${r.params.id}`));
-app.delete('/api/campaigns/:id', relay('DELETE', (r) => `/calls/bulk_call/${r.params.id}`));
-app.post('/api/campaigns/:id/contact', requireMinutes, relay('POST', (r) => `/calls/bulk_call/${r.params.id}/add_contact`));
-app.get('/api/campaigns/:id/live', relay('GET', (r) => `/bulk-call/${r.params.id}/live-status`));
+app.get('/api/campaigns/:id', campaignGuard, relay('GET', (r) => `/calls/bulk_call/${r.params.id}`));
+app.put('/api/campaigns/:id', campaignGuard, relay('PUT', (r) => `/calls/bulk_call/${r.params.id}`));
+app.delete('/api/campaigns/:id', campaignGuard, relay('DELETE', (r) => `/calls/bulk_call/${r.params.id}`));
+app.post('/api/campaigns/:id/contact', campaignGuard, requireMinutes, relay('POST', (r) => `/calls/bulk_call/${r.params.id}/add_contact`));
+app.get('/api/campaigns/:id/live', campaignGuard, relay('GET', (r) => `/bulk-call/${r.params.id}/live-status`));
 
 /* ================= Knowledge base (per-tenant ownership) ================= */
 app.get('/api/knowledge', async (req, res) => {
@@ -859,6 +964,10 @@ app.post('/api/knowledge/delete', kbFileGuard, (req, res, next) => {
 /* ================= Recordings ================= */
 app.get('/api/recording/:id', async (req, res) => {
   try {
+    // Tenant isolation: only stream recordings that belong to the client's own calls.
+    if (!req.user.demo && !(await userOwnsRecording(req, req.params.id))) {
+      return res.status(403).json({ error: 'This recording is not part of your account' });
+    }
     const qs = new URLSearchParams(req.query).toString();
     const upstream = await fetch(`${BASE}/recording/${req.params.id}${qs ? '?' + qs : ''}`, {
       headers: { Authorization: `Bearer ${KEY}` },
@@ -1168,6 +1277,7 @@ ${text.slice(0, 6000)}`;
 const analysisCache = new Map(); // callId -> {at, analysis}
 async function fetchLog(req, id) {
   if (req.user.demo) return demo.logs.find((l) => l.id === Number(id)) || null;
+  if (!(await userOwnsCall(req, id))) return null; // tenant isolation: only the owning client (or admin)
   const { status, data } = await omni('GET', `/calls/logs/${id}`);
   return status === 200 ? data : null;
 }
