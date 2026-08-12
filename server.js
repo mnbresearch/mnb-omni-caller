@@ -478,7 +478,7 @@ app.get('/api/me', async (req, res) => {
     user: {
       email: user.email, org: user.org, role: user.role, demo: !!user.demo,
       minuteCap: user.minuteCap, usedMinutes: usage,
-      remainingMinutes: (user.minuteCap && usage != null) ? Math.max(0, Number(user.minuteCap) - usage) : null,
+      remainingMinutes: (usage != null) ? Math.max(0, (Number(user.minuteCap) || 0) - usage) : null,
       agentIds: user.agentIds || [], numberIds: user.numberIds || [],
       businessType: user.businessType || 'general',
       agentCap: user.role === 'admin' ? 0 : (user.agentCap || 5),
@@ -663,8 +663,8 @@ async function requireMinutes(req, res, next) {
     if (isAdmin(req)) return next();
     const cap = Number(req.user.minuteCap) || 0;
     const used = await getUsageMinutes(req.user).catch(() => 0);
-    if (cap > 0 && used >= cap) {
-      return res.status(403).json({ error: `Your minute balance is used up (${used}/${cap} minutes). Please buy more minutes from the Billing tab to keep calling.` });
+    if (used >= cap) {
+      return res.status(403).json({ error: cap <= 0 ? 'You have no calling minutes yet. Please buy a minute pack from the Billing tab to start calling.' : `Your minute balance is used up (${used}/${cap} minutes). Please buy more minutes from the Billing tab to keep calling.` });
     }
     checkOmniBudget(); // fire-and-forget low-balance watch on the OmniDim account
     next();
@@ -804,8 +804,8 @@ app.post('/api/calls/dispatch', async (req, res) => {
   if (!isAdmin(req)) {
     const cap = Number(req.user.minuteCap) || 0;
     const used = await getUsageMinutes(req.user).catch(() => 0);
-    if (cap > 0 && used >= cap) {
-      return res.status(403).json({ error: `Your minute balance is used up (${used}/${cap} minutes). Please buy more minutes from the Billing tab to keep calling.` });
+    if (used >= cap) {
+      return res.status(403).json({ error: cap <= 0 ? 'You have no calling minutes yet. Please buy a minute pack from the Billing tab to start calling.' : `Your minute balance is used up (${used}/${cap} minutes). Please buy more minutes from the Billing tab to keep calling.` });
     }
     checkOmniBudget();
   }
