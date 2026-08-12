@@ -173,19 +173,18 @@ function sendAccessRequestEmails(u) {
   const step = (n, t) => `<tr><td style="vertical-align:top;padding:5px 12px 5px 0"><div style="width:24px;height:24px;border-radius:50%;background:${OR_GRAD};color:#111;font-weight:800;font-size:12px;text-align:center;line-height:24px">${n}</div></td><td style="vertical-align:middle;font-size:14px;color:#3a3a3a;padding:5px 0">${t}</td></tr>`;
   const reqInner = `
     <p style="margin:0 0 14px;font-size:16px;color:#1a1a1a">Hi ${eesc(firstName)},</p>
-    <p style="margin:0 0 18px;font-size:15px;color:#3a3a3a;line-height:1.65">Thank you for requesting access to <b>MNB Omni Caller</b> &mdash; MNB Research's human-sounding AI voice-agent platform that places real calls, qualifies leads, books appointments and answers customers 24/7 in 90+ languages. Your request is in, and our team will review it and get back to you shortly (usually within one business day).</p>
+    <p style="margin:0 0 18px;font-size:15px;color:#3a3a3a;line-height:1.65">Welcome to <b>MNB Omni Caller</b> &mdash; MNB Research's human-sounding AI voice-agent platform. Your account is ready to use right now. Sign in with the email and password you just created, add a prepaid minute pack, and your agent can start placing real calls in minutes.</p>
     <div style="background:#faf7f3;border:1px solid #f0e6da;border-radius:12px;padding:16px 18px;margin:0 0 22px">
-      <div style="font-weight:700;font-size:12px;letter-spacing:.6px;text-transform:uppercase;color:#c25a08;margin-bottom:10px">What happens next</div>
+      <div style="font-weight:700;font-size:12px;letter-spacing:.6px;text-transform:uppercase;color:#c25a08;margin-bottom:10px">Getting started</div>
       <table style="border-collapse:collapse">
-        ${step(1, 'We review your request')}
-        ${step(2, 'We approve access and set up your agent')}
-        ${step(3, "You're placing live calls &mdash; often the same day")}
+        ${step(1, 'Sign in to your dashboard')}
+        ${step(2, 'Buy a prepaid minute pack from the Billing tab')}
+        ${step(3, "Set up your agent and start calling")}
       </table>
     </div>
-    <p style="margin:0 0 16px;font-size:15px;color:#3a3a3a;line-height:1.65">While you wait, explore the platform live:</p>
-    <div>${btn(eesc(DEMO_URL), '&#9654; View the live demo')}</div>
+    <div>${btn(eesc((DEMO_URL || '').replace(/\/$/, '') + '/app'), 'Sign in to your account')}</div>
     <p style="margin:26px 0 0;font-size:14px;color:#3a3a3a">Warm regards,<br/><b>The MNB Research team</b></p>`;
-  resendSend({ to: u.email, subject: 'We received your access request \u2014 MNB Omni Caller', html: accessEmailShell(reqInner) });
+  resendSend({ to: u.email, subject: 'Your MNB Omni Caller account is ready', html: accessEmailShell(reqInner) });
 }
 
 // Contact-form email: notify contact@mnbresearch.com and acknowledge the sender.
@@ -238,11 +237,15 @@ app.post('/api/auth/signup', (req, res) => {
   if (!org || !email || !password) return res.status(400).json({ error: 'Organization, email and password are required' });
   if (String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
   if (db.findUserByEmail(email)) return res.status(409).json({ error: 'An account with this email already exists' });
-  const user = db.createUser({ email, password, org, contact, phone, note });
+  // Self-serve: account is active immediately with a zero minute balance so the
+  // customer can sign in and buy a prepaid pack right away.
+  const user = db.createUser({ email, password, org, contact, phone, note, status: 'active' });
   notifyNewLead(user);            // fire-and-forget push alert (ntfy)
-  sendAccessRequestEmails(user);  // fire-and-forget Resend emails (admin + requester)
+  sendAccessRequestEmails(user);  // fire-and-forget Resend emails (admin + welcome)
   onNewLead(user);                // fire-and-forget integration fan-out (Sheets/webhook/Slack/WhatsApp)
-  res.json({ ok: true, message: 'Thanks! Your request is in. MNB Research will reach out and approve your access shortly.' });
+  const token = db.createSession(user.id); // log them straight in
+  res.setHeader('Set-Cookie', `mnb_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=1209600`);
+  res.json({ ok: true, activated: true, message: 'Your account is ready! Taking you to your dashboard...' });
 });
 
 // Public contact form -> emails contact@mnbresearch.com (reply-to the sender) + acks the sender.

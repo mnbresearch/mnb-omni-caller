@@ -108,7 +108,7 @@ function createUser({ email, password, org, role = 'client', status = 'pending',
     demo: !!demo,
     agentIds: [],
     numberIds: [],
-    minuteCap: 500,
+    minuteCap: 0,
     agentCap: 5,
     createdAt: new Date().toISOString(),
   };
