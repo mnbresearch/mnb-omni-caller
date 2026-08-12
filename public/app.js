@@ -85,9 +85,9 @@ async function doSignup() {
         note: $('suNote').value.trim(),
       },
     });
-    $('loginOk').textContent = '\u2705 ' + (r.message || 'Request sent.');
+    $('loginOk').textContent = '\u2705 ' + (r.message || 'Account created.');
     $('loginOk').classList.remove('hidden');
-    setTimeout(showLogin, 2500);
+    if (r.activated) { setTimeout(function () { location.href = '/app'; }, 1200); } else { setTimeout(showLogin, 2500); }
   } catch (e) {
     $('loginError').textContent = e.message;
     $('loginError').classList.remove('hidden');
