@@ -3644,3 +3644,156 @@ async function detachNumber(numberId) {
   }
   setTimeout(checkReturn, 800);
 })();
+
+/* =======================================================================
+ * MNB Omni Caller - v21 layer
+ * Account self-service: change password, purchase history (receipts),
+ * a low-balance top-up nudge, and a "Forgot password?" link on the login
+ * screen. Additive, guarded, frontend-only.
+ * ==================================================================== */
+(function () {
+  if (window.__mnbEnhanced21) return; window.__mnbEnhanced21 = true;
+  var T = function (m, ms) { try { toast(m, ms); } catch (e) {} };
+  var E = function (s) { try { return esc(s); } catch (e) { return String(s == null ? '' : s); } };
+  var jpost = function (url, body) { return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); }); };
+
+  var css = document.createElement('style'); css.id = 'mnb-v21-css';
+  css.textContent =
+    '.v21-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:14px}' +
+    '@media(max-width:820px){.v21-grid{grid-template-columns:1fr}}' +
+    '.v21-card{background:var(--panel,#141416);border:1px solid var(--border,#2b2b2f);border-radius:16px;padding:22px}' +
+    '.v21-card h3{margin:0 0 12px;font-size:16px}' +
+    '.v21-card label{display:block;font-size:12px;color:var(--muted,#9a958c);margin:10px 0 5px;font-weight:600}' +
+    '.v21-card input{width:100%;background:var(--bg,#0e0f12);border:1px solid var(--border,#2b2b2f);color:var(--text,#eee);border-radius:9px;padding:10px 12px;font-size:14px;font-family:inherit}' +
+    '.v21-card input:focus{outline:none;border-color:var(--accent,#ff7a18)}' +
+    '.v21-btn{margin-top:14px;border:none;border-radius:9px;padding:11px 16px;font-weight:700;cursor:pointer;background:var(--accent-grad,linear-gradient(135deg,#ff7a18,#ffab5e));color:#111;font-size:14px}' +
+    '.v21-btn:disabled{opacity:.6;cursor:not-allowed}' +
+    '.v21-kv{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border,#2b2b2f);font-size:14px}' +
+    '.v21-kv:last-child{border-bottom:none}.v21-kv span:first-child{color:var(--muted,#9a958c)}' +
+    '.v21-tbl{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:4px}' +
+    '.v21-tbl th,.v21-tbl td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--border,#2b2b2f)}' +
+    '.v21-tbl th{color:var(--muted,#9a958c);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em}' +
+    '.v21-badge{font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px}' +
+    '.v21-paid{background:rgba(67,185,127,.18);color:#43b97f}.v21-pend{background:rgba(148,163,184,.18);color:#94a3b8}' +
+    '.v21-low{position:sticky;top:0;z-index:50;background:linear-gradient(135deg,rgba(255,122,24,.18),rgba(255,179,71,.10));border-bottom:1px solid rgba(255,122,24,.4);color:#ffd9b3;padding:10px 16px;display:flex;gap:12px;align-items:center;justify-content:center;font-size:14px;flex-wrap:wrap}' +
+    '.v21-low b{color:#fff}.v21-low button{border:none;border-radius:8px;padding:7px 14px;font-weight:700;cursor:pointer;background:var(--accent-grad,linear-gradient(135deg,#ff7a18,#ffab5e));color:#111;font-size:13px}' +
+    '.v21-low .x{background:transparent;color:#ffd9b3;border:1px solid rgba(255,255,255,.25);padding:6px 10px}' +
+    '.v21-forgot{display:block;margin-top:12px;text-align:center;font-size:13px;color:var(--accent2,#ffab5e);cursor:pointer;background:none;border:none;width:100%}';
+  document.head.appendChild(css);
+
+  function mkView(id) { var m = document.querySelector('main.main') || (document.getElementById('view-overview') || {}).parentNode; if (!m) return null; var s = document.createElement('section'); s.id = 'view-' + id; s.className = 'view hidden'; m.appendChild(s); return s; }
+  function mkNav(id, ico, label, before) {
+    var nav = document.querySelector('.sidebar nav') || document.querySelector('nav'); if (!nav || document.querySelector('.nav-item[data-view="' + id + '"]')) return;
+    var a = document.createElement('a'); a.href = '#' + id; a.className = 'nav-item'; a.setAttribute('data-view', id);
+    a.innerHTML = '<span class="ico">' + ico + '</span> ' + label;
+    var anchor = document.querySelector('.nav-item[data-view="' + before + '"]');
+    if (anchor) nav.insertBefore(a, anchor); else nav.appendChild(a);
+    a.addEventListener('click', function (e) { e.preventDefault(); window.switchView(id); });
+  }
+  var vAcc = mkView('account');
+  mkNav('account', '&#128100;', 'Account', 'billing');
+
+  var prevSwitch = window.switchView;
+  window.switchView = function (view) {
+    if (view === 'account') {
+      document.querySelectorAll('.view').forEach(function (v) { v.classList.add('hidden'); });
+      if (vAcc) vAcc.classList.remove('hidden');
+      document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.toggle('active', n.getAttribute('data-view') === 'account'); });
+      if (location.hash.replace('#', '') !== 'account') location.hash = 'account';
+      loadAccount(); return;
+    }
+    return prevSwitch.apply(this, arguments);
+  };
+
+  async function loadAccount() {
+    if (!vAcc) return;
+    vAcc.innerHTML = '<header class="view-head"><h2>Account</h2><p class="muted">Manage your login and view your purchase history.</p></header><div id="v21body"><p class="muted">Loading...</p></div>';
+    var me = {};
+    try { me = await fetch('/api/me', { cache: 'no-store' }).then(function (r) { return r.json(); }); } catch (e) {}
+    var u = (me && me.user) || {};
+    var info = '<div class="v21-card"><h3>Your account</h3>' +
+      '<div class="v21-kv"><span>Email</span><span>' + E(u.email || '') + '</span></div>' +
+      '<div class="v21-kv"><span>Organization</span><span>' + E(u.org || '') + '</span></div>' +
+      '<div class="v21-kv"><span>Plan</span><span>' + E(u.plan || 'prepaid') + '</span></div>' +
+      '<div class="v21-kv"><span>Minute balance</span><span><b>' + (u.remainingMinutes != null ? E(u.remainingMinutes) : E(u.minuteCap || 0)) + '</b> remaining</span></div>' +
+      '</div>';
+    var pw = u.demo
+      ? '<div class="v21-card"><h3>Password</h3><p class="muted" style="font-size:13.5px">The demo account password cannot be changed.</p></div>'
+      : '<div class="v21-card"><h3>Change password</h3>' +
+        '<label>Current password</label><input id="v21cur" type="password" autocomplete="current-password">' +
+        '<label>New password</label><input id="v21new" type="password" autocomplete="new-password" placeholder="At least 6 characters">' +
+        '<label>Confirm new password</label><input id="v21conf" type="password" autocomplete="new-password">' +
+        '<button class="v21-btn" id="v21pwbtn">Update password</button></div>';
+    vAcc.querySelector('#v21body').innerHTML = '<div class="v21-grid">' + info + pw + '</div>' +
+      '<div class="v21-card" style="margin-top:18px"><h3>Purchase history</h3><div id="v21orders"><p class="muted" style="font-size:13.5px">Loading receipts...</p></div></div>';
+
+    var b = document.getElementById('v21pwbtn');
+    if (b) b.addEventListener('click', changePw);
+    loadOrders();
+  }
+
+  async function changePw() {
+    var cur = document.getElementById('v21cur').value, nw = document.getElementById('v21new').value, cf = document.getElementById('v21conf').value;
+    if (nw.length < 6) return T('New password must be at least 6 characters');
+    if (nw !== cf) return T('New passwords do not match');
+    var b = document.getElementById('v21pwbtn'); b.disabled = true; var old = b.textContent; b.textContent = 'Updating...';
+    try {
+      var r = await jpost('/api/auth/change-password', { currentPassword: cur, newPassword: nw });
+      if (r.ok && r.j.ok) { T('Password updated'); document.getElementById('v21cur').value = ''; document.getElementById('v21new').value = ''; document.getElementById('v21conf').value = ''; }
+      else T(r.j.error || 'Could not update password');
+    } catch (e) { T('Network error'); }
+    b.disabled = false; b.textContent = old;
+  }
+
+  async function loadOrders() {
+    var el = document.getElementById('v21orders'); if (!el) return;
+    var orders = [];
+    try { orders = (await fetch('/api/pay/orders').then(function (r) { return r.json(); })).orders || []; } catch (e) {}
+    if (!orders.length) { el.innerHTML = '<p class="muted" style="font-size:13.5px">No purchases yet. Buy a minute pack from the Billing tab to get started.</p>'; return; }
+    var rows = orders.map(function (o) {
+      var d = o.createdAt ? new Date(o.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
+      var paid = o.status === 'PAID' || o.credited;
+      return '<tr><td>' + E(d) + '</td><td>' + E((o.plan || '').charAt(0).toUpperCase() + (o.plan || '').slice(1)) + '</td><td>&#8377;' + E(o.amount) + '</td><td>' + E(o.minutes) + ' min</td>' +
+        '<td><span class="v21-badge ' + (paid ? 'v21-paid' : 'v21-pend') + '">' + (paid ? 'Paid' : E(o.status || 'Pending')) + '</span></td></tr>';
+    }).join('');
+    el.innerHTML = '<table class="v21-tbl"><thead><tr><th>Date</th><th>Plan</th><th>Amount</th><th>Minutes</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+
+  /* ---- Low-balance nudge ---- */
+  var lowShown = false;
+  async function checkLowBalance() {
+    if (lowShown) return;
+    try {
+      var me = await fetch('/api/me', { cache: 'no-store' }).then(function (r) { return r.json(); });
+      var u = (me && me.user) || {};
+      if (!me.authed || u.demo || u.role === 'admin') return;
+      var rem = u.remainingMinutes;
+      if (rem == null || rem > 60) return;
+      if (sessionStorage.getItem('mnb_low_dismissed') === '1') return;
+      lowShown = true;
+      var bar = document.createElement('div'); bar.className = 'v21-low';
+      bar.innerHTML = '<span>' + (rem <= 0 ? 'You have <b>no calling minutes</b> left.' : 'Low balance: <b>' + E(rem) + ' minutes</b> left.') + '</span>' +
+        '<button id="v21buy">Buy minutes</button><button class="x" id="v21x">Dismiss</button>';
+      var main = document.querySelector('main.main') || document.body;
+      main.insertBefore(bar, main.firstChild);
+      document.getElementById('v21buy').addEventListener('click', function () { window.switchView('billing'); });
+      document.getElementById('v21x').addEventListener('click', function () { try { sessionStorage.setItem('mnb_low_dismissed', '1'); } catch (e) {} bar.remove(); });
+    } catch (e) {}
+  }
+  setTimeout(checkLowBalance, 1500);
+
+  /* ---- "Forgot password?" on the login screen ---- */
+  function injectForgot() {
+    var lf = document.getElementById('loginForm'); if (!lf || document.getElementById('v21forgot')) return;
+    var link = document.createElement('button'); link.type = 'button'; link.id = 'v21forgot'; link.className = 'v21-forgot'; link.textContent = 'Forgot password?';
+    lf.appendChild(link);
+    link.addEventListener('click', async function () {
+      var email = prompt('Enter your account email and we will send you a password reset link:');
+      if (!email) return;
+      try { var r = await jpost('/api/auth/forgot-password', { email: email.trim() }); T((r.j && r.j.message) || 'If that email exists, a reset link is on its way.', 5000); }
+      catch (e) { T('Could not send reset link. Please try again.'); }
+    });
+  }
+  injectForgot();
+  setTimeout(injectForgot, 1200);
+})();
