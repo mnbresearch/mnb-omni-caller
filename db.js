@@ -14,8 +14,9 @@ const REDIS_KEY = 'mnb:omnicaller:db';
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
-let state = { users: [], sessions: {}, kbOwners: {}, settings: {}, userData: {}, orders: {} };
+let state = { users: [], sessions: {}, kbOwners: {}, settings: {}, userData: {}, orders: {}, resetTokens: {} };
 let redis = null;
+const memRL = new Map(); // in-memory rate-limit fallback when Redis is down
 
 function normalize() {
   state.users ||= [];
@@ -24,6 +25,7 @@ function normalize() {
   state.settings ||= {};
   state.userData ||= {};
   state.orders ||= {};
+  state.resetTokens ||= {};
 }
 
 /* ---------- persistence backend ---------- */
@@ -145,6 +147,32 @@ function getSession(token) {
   return s;
 }
 function destroySession(token) { delete state.sessions[token]; save(); }
+function destroyUserSessions(userId) {
+  for (const [tok, s] of Object.entries(state.sessions)) if (s.userId === userId) delete state.sessions[tok];
+  save();
+}
+
+/* ---------- password-reset tokens (hashed, single-use, expiring) ---------- */
+function createResetToken(email, ttlMs = 1800000) {
+  const user = findUserByEmail(email);
+  if (!user) return null;
+  const raw = crypto.randomBytes(32).toString('hex');
+  const hash = crypto.createHash('sha256').update(raw).digest('hex');
+  state.resetTokens ||= {};
+  state.resetTokens[hash] = { email: user.email, expires: Date.now() + ttlMs };
+  save();
+  return raw;
+}
+function consumeResetToken(raw) {
+  if (!raw) return null;
+  const hash = crypto.createHash('sha256').update(String(raw)).digest('hex');
+  const rec = (state.resetTokens || {})[hash];
+  if (!rec) return null;
+  delete state.resetTokens[hash];
+  save();
+  if (rec.expires < Date.now()) return null;
+  return rec.email;
+}
 
 /* ---------- knowledge-base file ownership ---------- */
 function setKbOwner(fileId, userId) { state.kbOwners[String(fileId)] = userId; save(); }
@@ -209,11 +237,31 @@ function ensureDemo(demoAgentId) {
 }
 function getDemoUser() { return findUserByEmail(DEMO_EMAIL); }
 
+/* ---------- rate limiting (Redis-backed, in-memory fallback) ----------
+ * Returns true if ALLOWED, false if the key exceeded `max` hits within
+ * `windowSec`. Fails open so a Redis hiccup never blocks real users. */
+async function rateHit(key, max, windowSec) {
+  if (redis) {
+    try {
+      const k = 'rl:' + key;
+      const n = await redis.incr(k);
+      if (n === 1) await redis.expire(k, windowSec);
+      return n <= max;
+    } catch (e) { return true; }
+  }
+  const now = Date.now();
+  const e = memRL.get(key);
+  if (!e || now > e.reset) { memRL.set(key, { count: 1, reset: now + windowSec * 1000 }); return true; }
+  e.count++;
+  return e.count <= max;
+}
+
 module.exports = {
-  init, flush,
+  init, flush, rateHit,
   hashPassword, verifyPassword,
   findUserByEmail, findUserById, createUser, updateUser, deleteUser, listUsers,
-  createSession, getSession, destroySession,
+  createSession, getSession, destroySession, destroyUserSessions,
+  createResetToken, consumeResetToken,
   setKbOwner, getKbOwner, removeKbOwner,
   getSettings, setSettings, patchSettings,
   getUserData, setUserBucket,

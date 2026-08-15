@@ -15,6 +15,27 @@ const crypto = require('crypto');
 // Capture the raw request body so we can verify payment-webhook signatures.
 app.use(express.json({ limit: '30mb', verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
+// Baseline security headers on every response.
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  next();
+});
+
+// Per-IP rate limiter for public endpoints (Redis-backed via db, fails open).
+function rateLimit(max, windowSec) {
+  return async (req, res, next) => {
+    try {
+      const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || (req.socket && req.socket.remoteAddress) || 'ip';
+      const ok = await db.rateHit(req.path + '|' + ip, max, windowSec);
+      if (!ok) return res.status(429).json({ error: 'Too many requests. Please wait a minute and try again.' });
+    } catch (e) {}
+    next();
+  };
+}
+
 // Serverless-friendly one-time init (Vercel invokes this module per request).
 // The database, admin and demo accounts are set up once, then every request
 // waits on that promise before proceeding.
@@ -232,7 +253,7 @@ async function sendContactEmail(m) {
   return ok;
 }
 
-app.post('/api/auth/signup', (req, res) => {
+app.post('/api/auth/signup', rateLimit(5, 3600), (req, res) => {
   const { org, email, password, contact, phone, note } = req.body || {};
   if (!org || !email || !password) return res.status(400).json({ error: 'Organization, email and password are required' });
   if (String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
@@ -249,7 +270,7 @@ app.post('/api/auth/signup', (req, res) => {
 });
 
 // Public contact form -> emails contact@mnbresearch.com (reply-to the sender) + acks the sender.
-app.post('/api/contact', async (req, res) => {
+app.post('/api/contact', rateLimit(5, 3600), async (req, res) => {
   const b = req.body || {};
   // Honeypot: bots fill hidden "website" field; pretend success and drop.
   if (b.website) return res.json({ ok: true });
@@ -338,6 +359,21 @@ function creditOrderOnce(order) {
         Order: ${eesc(order.orderId)}</p>`),
     });
   } catch (e) {}
+  try {
+    resendSend({
+      to: user.email,
+      subject: `Payment received - ${addMin} minutes added | MNB Omni Caller`,
+      html: accessEmailShell(`<p style="font-size:16px;color:#1a1a1a">Thank you for your purchase!</p>
+        <p style="font-size:14px;color:#3a3a3a;line-height:1.65">Your payment was successful and <b>${addMin} calling minutes</b> have been added to your MNB Omni Caller account.</p>
+        <table style="width:100%;border-collapse:collapse;border-top:1px solid #f0f0f0;margin-top:8px">
+          <tr><td style="padding:8px 0;color:#888;font-size:13px;width:150px">Plan</td><td style="padding:8px 0;font-size:14px;color:#1a1a1a">${eesc(plan.name)}</td></tr>
+          <tr><td style="padding:8px 0;color:#888;font-size:13px">Amount paid</td><td style="padding:8px 0;font-size:14px;color:#1a1a1a">${eesc(plan.currency)} ${eesc(String(plan.amount))}</td></tr>
+          <tr><td style="padding:8px 0;color:#888;font-size:13px">Minutes added</td><td style="padding:8px 0;font-size:14px;color:#1a1a1a">${addMin}</td></tr>
+          <tr><td style="padding:8px 0;color:#888;font-size:13px">Order ID</td><td style="padding:8px 0;font-size:14px;color:#1a1a1a">${eesc(order.orderId)}</td></tr>
+        </table>
+        <p style="font-size:13px;color:#9a9a9a;margin-top:16px">This is your receipt. For any billing question, reply to this email or write to contact@mnbresearch.com.</p>`),
+    });
+  } catch (e) {}
   return order;
 }
 
@@ -351,8 +387,18 @@ app.get('/api/pay/plans', (req, res) => {
   });
 });
 
+// A client's own purchase history (receipts).
+app.get('/api/pay/orders', (req, res) => {
+  const user = currentUser(req);
+  if (!user) return res.status(401).json({ error: 'Please sign in.' });
+  const orders = db.listOrdersByUser(user.id)
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+    .map((o) => ({ orderId: o.orderId, plan: o.planId, amount: o.amount, currency: o.currency, minutes: o.minutes, status: o.status, credited: !!o.credited, createdAt: o.createdAt }));
+  res.json({ orders });
+});
+
 // Create a Cashfree order for the logged-in user. Amount is set server-side.
-app.post('/api/pay/create-order', async (req, res) => {
+app.post('/api/pay/create-order', rateLimit(20, 3600), async (req, res) => {
   const user = currentUser(req);
   if (!user) return res.status(401).json({ error: 'Please sign in to make a purchase.' });
   if (user.demo) return res.status(403).json({ error: 'The demo account cannot make purchases.' });
@@ -439,7 +485,7 @@ app.post('/api/pay/webhook', (req, res) => {
   }
 });
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', rateLimit(20, 900), (req, res) => {
   const { email, password } = req.body || {};
   const user = email && db.findUserByEmail(email);
   if (!user || !db.verifyPassword(password || '', user.passHash)) {
@@ -459,12 +505,56 @@ app.post('/api/auth/logout', (req, res) => {
 });
 
 // One-click read-only demo login (no password) \u2014 powers "View live demo".
-app.post('/api/auth/demo', (req, res) => {
+app.post('/api/auth/demo', rateLimit(30, 3600), (req, res) => {
   const u = db.getDemoUser();
   if (!u) return res.status(503).json({ error: 'Demo is warming up, please try again in a moment.' });
   const token = db.createSession(u.id);
   res.setHeader('Set-Cookie', `mnb_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=86400`);
   res.json({ ok: true });
+});
+
+// Change password (signed-in users).
+app.post('/api/auth/change-password', rateLimit(10, 900), (req, res) => {
+  const user = currentUser(req);
+  if (!user) return res.status(401).json({ error: 'Please sign in.' });
+  if (user.demo) return res.status(403).json({ error: 'The demo account password cannot be changed.' });
+  const { currentPassword, newPassword } = req.body || {};
+  if (!db.verifyPassword(currentPassword || '', user.passHash)) return res.status(403).json({ error: 'Your current password is incorrect.' });
+  if (String(newPassword || '').length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters.' });
+  db.updateUser(user.id, { passHash: db.hashPassword(newPassword) });
+  res.json({ ok: true, message: 'Password updated successfully.' });
+});
+
+// Forgot password - emails a single-use reset link. Never reveals whether an
+// account exists (no email enumeration).
+app.post('/api/auth/forgot-password', rateLimit(5, 3600), (req, res) => {
+  const email = String((req.body || {}).email || '').trim();
+  const generic = { ok: true, message: 'If an account exists for that email, a password reset link is on its way.' };
+  if (!EMAIL_RE.test(email)) return res.json(generic);
+  const token = db.createResetToken(email);
+  if (token) {
+    const base = (DEMO_URL || '').replace(/\/$/, '');
+    const link = `${base}/reset.html?token=${token}`;
+    const inner = `<p style="margin:0 0 14px;font-size:16px;color:#1a1a1a">Reset your password</p>
+      <p style="margin:0 0 18px;font-size:15px;color:#3a3a3a;line-height:1.65">We received a request to reset your MNB Omni Caller password. Click the button below to choose a new one. This link expires in 30 minutes. If you did not request this, you can safely ignore this email.</p>
+      <div style="margin:0 0 18px"><a href="${link}" style="display:inline-block;background:${OR_GRAD};color:#111;font-weight:700;font-size:14px;text-decoration:none;padding:12px 24px;border-radius:8px">Reset password</a></div>
+      <p style="margin:0;font-size:12px;color:#9a9a9a;word-break:break-all">Or paste this link into your browser: ${eesc(link)}</p>`;
+    resendSend({ to: email, subject: 'Reset your MNB Omni Caller password', html: accessEmailShell(inner) });
+  }
+  res.json(generic);
+});
+
+// Reset password with a valid token.
+app.post('/api/auth/reset-password', rateLimit(10, 3600), (req, res) => {
+  const { token, newPassword } = req.body || {};
+  if (String(newPassword || '').length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters.' });
+  const email = db.consumeResetToken(token);
+  if (!email) return res.status(400).json({ error: 'This reset link is invalid or has expired. Please request a new one.' });
+  const user = db.findUserByEmail(email);
+  if (!user) return res.status(400).json({ error: 'Account not found.' });
+  db.updateUser(user.id, { passHash: db.hashPassword(newPassword) });
+  db.destroyUserSessions(user.id); // sign out everywhere after a reset
+  res.json({ ok: true, message: 'Your password has been reset. You can now sign in with your new password.' });
 });
 
 app.get('/api/me', async (req, res) => {
