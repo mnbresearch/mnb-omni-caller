@@ -1081,6 +1081,30 @@ app.get('/api/numbers', async (req, res) => {
     res.json({ success: true, phone_numbers: numbers });
   } catch (e) { res.status(502).json({ error: 'Upstream request failed' }); }
 });
+// A client requests a calling number; MNB provisions and attaches it for them.
+app.post('/api/numbers/request', rateLimit(5, 3600), (req, res) => {
+  const user = currentUser(req);
+  if (!user) return res.status(401).json({ error: 'Please sign in.' });
+  if (user.demo) return res.status(403).json({ error: 'The demo account cannot request a number.' });
+  const note = String((req.body || {}).note || '').slice(0, 500);
+  const row = (k, v) => v ? `<tr><td style="padding:8px 0;color:#888;font-size:13px;width:130px">${k}</td><td style="padding:8px 0;font-size:14px;color:#1a1a1a">${v}</td></tr>` : '';
+  try {
+    resendSend({
+      to: MAIL_ADMIN,
+      subject: `Number request - ${user.contact || user.org || user.email}`,
+      html: accessEmailShell(`<div style="display:inline-block;background:rgba(238,108,10,.1);color:#c25a08;font-weight:700;font-size:11px;letter-spacing:.6px;text-transform:uppercase;padding:5px 12px;border-radius:20px;margin-bottom:14px">Phone number request</div>
+        <p style="margin:0 0 16px;font-size:15px;color:#1a1a1a">A client has requested a calling number. Assign one to their organization from the Admin tab, then attach it to their agent.</p>
+        <table style="width:100%;border-collapse:collapse;border-top:1px solid #f0f0f0">
+          ${row('Organization', eesc(user.org || ''))}
+          ${row('Contact', eesc(user.contact || ''))}
+          ${row('Email', eesc(user.email))}
+          ${row('Phone', eesc(user.phone || ''))}
+          ${row('Note', eesc(note))}
+        </table>`),
+    });
+  } catch (e) {}
+  res.json({ ok: true, message: 'Request received. We will provision your calling number and email you when it is ready, usually within one business day.' });
+});
 app.post('/api/numbers/attach', adminOnly, relay('POST', '/phone_number/attach'));
 app.post('/api/numbers/detach', adminOnly, relay('POST', '/phone_number/detach'));
 app.get('/api/voices', relay('GET', '/providers/voices', { passQuery: true }));
