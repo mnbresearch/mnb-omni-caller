@@ -3887,7 +3887,7 @@ async function detachNumber(numberId) {
     var s = await stats();
     var steps = [
       { done: s.cap > 0, t: 'Buy calling minutes', d: 'Add a prepaid pack (from &#8377;3,000 for 500 minutes at &#8377;6/min). Minutes are used as you call and never expire monthly.', b: 'Buy minutes', a: 'billing' },
-      { done: s.agents > 0, t: 'Build your AI agent', d: 'Give it a purpose, a voice and your knowledge base. It learns how to greet, qualify and close - no coding.', b: 'Create agent', a: 'studio' },
+      { done: s.agents > 0, t: 'Build your AI agent', d: 'Give it a purpose, a voice and your knowledge base. It learns how to greet, qualify and close - no coding. <button class="v22-btn ghost" data-act="reqagent" style="margin-top:9px;padding:6px 12px;font-size:12px">Or have MNB build it for you</button>', b: 'Create agent', a: 'studio' },
       { done: s.numbers > 0, t: 'Get your calling number', d: 'Request a dedicated caller-ID number. We provision and attach it to your agent, usually within one business day.', b: 'Request number', a: 'reqnum' },
       { done: s.calls > 0, t: 'Place your first call', d: 'Enter a number and dispatch. Your agent talks, listens and adapts in real time, then returns a transcript, summary and recording.', b: 'Make a call', a: 'call' }
     ];
@@ -3904,9 +3904,20 @@ async function detachNumber(numberId) {
       b.addEventListener('click', function () {
         var a = b.getAttribute('data-act');
         if (a === 'reqnum') return requestNumber();
+        if (a === 'reqagent') return requestAgent();
         window.switchView(a);
       });
     });
+  }
+
+  async function requestAgent() {
+    var note = prompt('Tell us what your agent should do - its purpose, who it calls and what it should say - and MNB will build and set it up for you:', '');
+    if (note === null) return;
+    try {
+      var r = await fetch('/api/agents/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note: note }) });
+      var j = await r.json().catch(function () { return {}; });
+      if (r.ok && j.ok) T(j.message || 'Agent request received.', 6000); else T(j.error || 'Could not send request', 5000);
+    } catch (e) { T('Network error. Please try again.'); }
   }
 
   async function requestNumber() {
