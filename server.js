@@ -845,6 +845,32 @@ app.put('/api/agents/:id', (req, res, next) => {
 // own AI agent; the new agent is auto-assigned to that account so the client
 // can train, dispatch, and manage it. Clients are capped by agentCap (admins
 // are unlimited). Demo writes are already blocked upstream.
+// Hybrid model: a client can ask MNB to build/customize an agent for them
+// (as an alternative to self-serve creation). Emails the admin.
+app.post('/api/agents/request', rateLimit(5, 3600), (req, res) => {
+  const user = currentUser(req);
+  if (!user) return res.status(401).json({ error: 'Please sign in.' });
+  if (user.demo) return res.status(403).json({ error: 'The demo account cannot request an agent.' });
+  const note = String((req.body || {}).note || '').slice(0, 2000);
+  const row = (k, v) => v ? `<tr><td style="padding:8px 0;color:#888;font-size:13px;width:130px;vertical-align:top">${k}</td><td style="padding:8px 0;font-size:14px;color:#1a1a1a">${v}</td></tr>` : '';
+  try {
+    resendSend({
+      to: MAIL_ADMIN,
+      subject: `Agent build request - ${user.contact || user.org || user.email}`,
+      html: accessEmailShell(`<div style="display:inline-block;background:rgba(238,108,10,.1);color:#c25a08;font-weight:700;font-size:11px;letter-spacing:.6px;text-transform:uppercase;padding:5px 12px;border-radius:20px;margin-bottom:14px">Agent build request</div>
+        <p style="margin:0 0 16px;font-size:15px;color:#1a1a1a">A client wants MNB to build an AI agent for them. Create it and delegate it to their organization from the Admin tab.</p>
+        <table style="width:100%;border-collapse:collapse;border-top:1px solid #f0f0f0">
+          ${row('Organization', eesc(user.org || ''))}
+          ${row('Contact', eesc(user.contact || ''))}
+          ${row('Email', eesc(user.email))}
+          ${row('Phone', eesc(user.phone || ''))}
+          ${row('What they want', eesc(note))}
+        </table>`),
+    });
+  } catch (e) {}
+  res.json({ ok: true, message: 'Request received. Our team will build your agent and add it to your dashboard, usually within one business day.' });
+});
+
 app.post('/api/agents', async (req, res) => {
   try {
     if (!isAdmin(req)) {
