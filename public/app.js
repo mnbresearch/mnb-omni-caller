@@ -3797,3 +3797,156 @@ async function detachNumber(numberId) {
   injectForgot();
   setTimeout(injectForgot, 1200);
 })();
+
+/* =======================================================================
+ * MNB Omni Caller - v22 layer
+ * "Get Started" onboarding wizard: a live 4-step checklist that walks a new
+ * client through the whole journey (buy minutes -> build agent -> get a
+ * number -> place the first call), plus a self-serve "Request a number"
+ * action. Additive, guarded, frontend-only.
+ * ==================================================================== */
+(function () {
+  if (window.__mnbEnhanced22) return; window.__mnbEnhanced22 = true;
+  var T = function (m, ms) { try { toast(m, ms); } catch (e) {} };
+  var E = function (s) { try { return esc(s); } catch (e) { return String(s == null ? '' : s); } };
+
+  var css = document.createElement('style'); css.id = 'mnb-v22-css';
+  css.textContent =
+    '.v22-prog{height:8px;border-radius:20px;background:var(--panel-2,#1d1d20);overflow:hidden;margin:6px 0 20px}' +
+    '.v22-prog>i{display:block;height:100%;background:var(--accent-grad,linear-gradient(135deg,#ff7a18,#ffab5e));transition:width .4s}' +
+    '.v22-step{display:flex;gap:14px;align-items:flex-start;background:var(--panel,#141416);border:1px solid var(--border,#2b2b2f);border-radius:14px;padding:16px 18px;margin-bottom:12px}' +
+    '.v22-step.done{opacity:.7}' +
+    '.v22-num{flex:none;width:32px;height:32px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:14px;background:var(--panel-2,#1d1d20);border:1px solid var(--border,#2b2b2f);color:var(--text,#eee)}' +
+    '.v22-step.done .v22-num{background:rgba(67,185,127,.18);border-color:rgba(67,185,127,.5);color:#43b97f}' +
+    '.v22-step h4{margin:0 0 3px;font-size:15px}.v22-step p{margin:0;color:var(--muted,#9a958c);font-size:13.5px}' +
+    '.v22-act{margin-left:auto;align-self:center}' +
+    '.v22-btn{border:none;border-radius:9px;padding:9px 16px;font-weight:700;cursor:pointer;background:var(--accent-grad,linear-gradient(135deg,#ff7a18,#ffab5e));color:#111;font-size:13.5px;white-space:nowrap}' +
+    '.v22-btn.ghost{background:transparent;border:1px solid var(--border,#2b2b2f);color:var(--text,#eee)}' +
+    '.v22-done-tag{color:#43b97f;font-weight:700;font-size:13px}' +
+    '.v22-help{background:var(--panel-2,#1d1d20);border:1px solid var(--border,#2b2b2f);border-radius:12px;padding:14px 16px;margin-top:16px;color:var(--muted,#9a958c);font-size:13px;line-height:1.6}';
+  document.head.appendChild(css);
+
+  function mkView(id) { var m = document.querySelector('main.main') || (document.getElementById('view-overview') || {}).parentNode; if (!m) return null; var s = document.createElement('section'); s.id = 'view-' + id; s.className = 'view hidden'; m.appendChild(s); return s; }
+  function mkNav(id, ico, label, before) {
+    var nav = document.querySelector('.sidebar nav') || document.querySelector('nav'); if (!nav || document.querySelector('.nav-item[data-view="' + id + '"]')) return true;
+    var a = document.createElement('a'); a.href = '#' + id; a.className = 'nav-item'; a.setAttribute('data-view', id);
+    a.innerHTML = '<span class="ico">' + ico + '</span> ' + label;
+    var anchor = document.querySelector('.nav-item[data-view="' + before + '"]');
+    if (anchor) nav.insertBefore(a, anchor); else nav.appendChild(a);
+    a.addEventListener('click', function (e) { e.preventDefault(); window.switchView(id); });
+    return true;
+  }
+
+  var vGS = null, wired = false;
+  function build() {
+    if (!vGS) vGS = mkView('getstarted');
+    if (!vGS) return false;
+    mkNav('getstarted', '&#128640;', 'Get Started', 'overview');
+    if (!wired) {
+      wired = true;
+      var prevSwitch = window.switchView;
+      window.switchView = function (view) {
+        if (view === 'getstarted') {
+          document.querySelectorAll('.view').forEach(function (v) { v.classList.add('hidden'); });
+          vGS.classList.remove('hidden');
+          document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.toggle('active', n.getAttribute('data-view') === 'getstarted'); });
+          if (location.hash.replace('#', '') !== 'getstarted') location.hash = 'getstarted';
+          loadGetStarted(); return;
+        }
+        var r = prevSwitch.apply(this, arguments);
+        if (view === 'numbers') setTimeout(injectNumberRequest, 400);
+        return r;
+      };
+    }
+    return true;
+  }
+
+  async function stats() {
+    var out = { minutes: 0, cap: 0, agents: 0, numbers: 0, calls: 0, demo: false, admin: false, authed: false };
+    try {
+      var me = await fetch('/api/me', { cache: 'no-store' }).then(function (r) { return r.json(); });
+      out.authed = !!me.authed; var u = me.user || {};
+      out.demo = !!u.demo; out.admin = u.role === 'admin'; out.cap = Number(u.minuteCap) || 0;
+      out.minutes = (u.remainingMinutes != null) ? u.remainingMinutes : out.cap;
+    } catch (e) {}
+    try { out.agents = ((await fetch('/api/agents').then(function (r) { return r.json(); })).bots || []).length; } catch (e) {}
+    try { out.numbers = ((await fetch('/api/numbers').then(function (r) { return r.json(); })).phone_numbers || []).length; } catch (e) {}
+    try { var l = await fetch('/api/calls/logs?pageno=1&pagesize=1').then(function (r) { return r.json(); }); out.calls = (l.total_records != null ? l.total_records : (l.call_log_data || []).length); } catch (e) {}
+    return out;
+  }
+
+  function stepHtml(n, done, title, desc, btnLabel, act) {
+    return '<div class="v22-step ' + (done ? 'done' : '') + '"><div class="v22-num">' + (done ? '&#10003;' : n) + '</div>' +
+      '<div><h4>' + E(title) + '</h4><p>' + desc + '</p></div>' +
+      '<div class="v22-act">' + (done ? '<span class="v22-done-tag">Done</span>' : '<button class="v22-btn" data-act="' + act + '">' + E(btnLabel) + '</button>') + '</div></div>';
+  }
+
+  async function loadGetStarted() {
+    if (!vGS) return;
+    vGS.innerHTML = '<header class="view-head"><h2>Get started</h2><p class="muted">Four quick steps to your first live AI call.</p></header><div id="v22body"><p class="muted">Checking your setup...</p></div>';
+    var s = await stats();
+    var steps = [
+      { done: s.cap > 0, t: 'Buy calling minutes', d: 'Add a prepaid pack (from &#8377;3,000 for 500 minutes at &#8377;6/min). Minutes are used as you call and never expire monthly.', b: 'Buy minutes', a: 'billing' },
+      { done: s.agents > 0, t: 'Build your AI agent', d: 'Give it a purpose, a voice and your knowledge base. It learns how to greet, qualify and close - no coding.', b: 'Create agent', a: 'studio' },
+      { done: s.numbers > 0, t: 'Get your calling number', d: 'Request a dedicated caller-ID number. We provision and attach it to your agent, usually within one business day.', b: 'Request number', a: 'reqnum' },
+      { done: s.calls > 0, t: 'Place your first call', d: 'Enter a number and dispatch. Your agent talks, listens and adapts in real time, then returns a transcript, summary and recording.', b: 'Make a call', a: 'call' }
+    ];
+    var doneCount = steps.filter(function (x) { return x.done; }).length;
+    var pct = Math.round((doneCount / steps.length) * 100);
+    var body = document.getElementById('v22body');
+    var allDone = doneCount === steps.length;
+    body.innerHTML =
+      '<div class="v22-prog"><i style="width:' + pct + '%"></i></div>' +
+      '<p class="muted" style="margin:-12px 0 16px;font-size:13px">' + doneCount + ' of ' + steps.length + ' complete' + (allDone ? ' - you are fully set up!' : '') + '</p>' +
+      steps.map(function (st, i) { return stepHtml(i + 1, st.done, st.t, st.d, st.b, st.a); }).join('') +
+      '<div class="v22-help"><b style="color:var(--text,#eee)">How it works:</b> You pay MNB Research for prepaid minutes via secure Cashfree checkout. Those minutes power calls placed by your own AI agent through your dedicated number. Manage your balance and receipts any time from the <a href="#billing" style="color:var(--accent2,#ffab5e)">Billing</a> and <a href="#account" style="color:var(--accent2,#ffab5e)">Account</a> tabs. Questions? <a href="/contact.html" style="color:var(--accent2,#ffab5e)">Contact us</a>.</div>';
+    body.querySelectorAll('[data-act]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var a = b.getAttribute('data-act');
+        if (a === 'reqnum') return requestNumber();
+        window.switchView(a);
+      });
+    });
+  }
+
+  async function requestNumber() {
+    var note = prompt('Request a calling number. Optionally tell us your preferred area/city or any details:', '');
+    if (note === null) return;
+    try {
+      var r = await fetch('/api/numbers/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note: note }) });
+      var j = await r.json().catch(function () { return {}; });
+      if (r.ok && j.ok) T(j.message || 'Number request received.', 6000); else T(j.error || 'Could not send request', 5000);
+    } catch (e) { T('Network error. Please try again.'); }
+  }
+
+  // When the Numbers view is empty, add a "Request a number" button there too.
+  function injectNumberRequest() {
+    var v = document.getElementById('view-numbers'); if (!v || document.getElementById('v22reqbtn')) return;
+    var hasRows = /\+?\d[\d\s\-()]{5,}/.test(v.textContent || '');
+    var wrap = document.createElement('div'); wrap.style.marginTop = '16px';
+    wrap.innerHTML = '<button id="v22reqbtn" class="v22-btn">Request a calling number</button>' +
+      (hasRows ? '' : '<p class="muted" style="font-size:13px;margin-top:10px">You do not have a calling number yet. Request one and we will provision it for you.</p>');
+    v.appendChild(wrap);
+    document.getElementById('v22reqbtn').addEventListener('click', requestNumber);
+  }
+
+  /* Auto-open Get Started for brand-new empty accounts (once per session). */
+  async function maybeAutoOpen() {
+    if (sessionStorage.getItem('mnb_gs_seen') === '1') return;
+    try {
+      var s = await stats();
+      if (!s.authed || s.demo || s.admin) return;
+      if (s.cap === 0 && s.agents === 0 && s.numbers === 0) {
+        sessionStorage.setItem('mnb_gs_seen', '1');
+        window.switchView('getstarted');
+      }
+    } catch (e) {}
+  }
+
+  // Build now; retry a couple of times in case the app UI mounts slightly later.
+  var tries = 0;
+  (function boot() {
+    if (build()) { setTimeout(maybeAutoOpen, 1600); return; }
+    if (tries++ < 6) setTimeout(boot, 700);
+  })();
+})();

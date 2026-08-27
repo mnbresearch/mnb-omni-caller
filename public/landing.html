@@ -93,7 +93,7 @@ h2{font-size:2.3rem;text-align:center;letter-spacing:-.5px;margin-bottom:14px;fo
 .card p{color:var(--muted);font-size:.94rem}
 
 /* steps */
-.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;counter-reset:s}
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px;counter-reset:s}
 @media(max-width:860px){.steps{grid-template-columns:1fr}}
 .step{position:relative;padding:26px;background:var(--panel);border:1px solid var(--border);border-radius:16px}
 .step .n{width:38px;height:38px;border-radius:10px;background:var(--grad);color:#111;font-weight:800;display:flex;align-items:center;justify-content:center;margin-bottom:14px}
@@ -224,13 +224,16 @@ footer .bot{border-top:1px solid var(--border);padding-top:20px;font-size:.85rem
 <section class="pad" id="how" style="background:var(--panel)">
   <div class="wrap">
     <div class="eyebrow reveal">Simple by design</div>
-    <h2 class="reveal">Live in three steps</h2>
-    <p class="sub reveal">No engineers, no setup calls. If you can send an email, you can run a voice agent.</p>
+    <h2 class="reveal">From sign-up to live calls in five steps</h2>
+    <p class="sub reveal">No engineers, no setup calls, no waiting for approval. Everything below is self-serve inside your dashboard.</p>
     <div class="steps">
-      <div class="step reveal"><div class="n">1</div><h3>Train your agent</h3><p>Give it a purpose, a voice and your knowledge. It learns how to greet, qualify and close.</p></div>
-      <div class="step reveal"><div class="n">2</div><h3>Place a call</h3><p>Enter a number and dispatch. The agent talks, listens and adapts &#8212; in real time, in the caller's language.</p></div>
-      <div class="step reveal"><div class="n">3</div><h3>Read the results</h3><p>Every call comes back with a transcript, summary, sentiment and recording. Delegate it to a client and repeat.</p></div>
+      <div class="step reveal"><div class="n">1</div><h3>Create your account</h3><p>Sign up in seconds and land straight in your dashboard &#8212; instant access, no card needed to start.</p></div>
+      <div class="step reveal"><div class="n">2</div><h3>Buy prepaid minutes</h3><p>Add a pack from &#8377;3,000 (&#8377;6 per minute) via secure Cashfree checkout. Minutes are used as you call and top up any time.</p></div>
+      <div class="step reveal"><div class="n">3</div><h3>Build your AI agent</h3><p>Give it a purpose, a voice and your knowledge base. It learns to greet, qualify and close &#8212; no code.</p></div>
+      <div class="step reveal"><div class="n">4</div><h3>Get your number</h3><p>Request a dedicated calling number from your dashboard and we provision and attach it to your agent for you.</p></div>
+      <div class="step reveal"><div class="n">5</div><h3>Go live</h3><p>Place calls and campaigns. Each call returns a transcript, summary, sentiment and recording &#8212; in 90+ languages.</p></div>
     </div>
+    <p class="sub reveal" style="margin-top:24px;font-size:.95rem">In short: you pay MNB Research for prepaid minutes, and those minutes power calls placed by <b>your own</b> AI agent through <b>your own</b> number. You manage your balance, receipts, agents and numbers yourself &#8212; and we're one message away if you need a hand.</p>
   </div>
 </section>
 
