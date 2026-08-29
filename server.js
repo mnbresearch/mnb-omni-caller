@@ -253,7 +253,7 @@ async function sendContactEmail(m) {
   return ok;
 }
 
-app.post('/api/auth/signup', rateLimit(5, 3600), (req, res) => {
+app.post('/api/auth/signup', rateLimit(5, 3600), async (req, res) => {
   const { org, email, password, contact, phone, note } = req.body || {};
   if (!org || !email || !password) return res.status(400).json({ error: 'Organization, email and password are required' });
   if (String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
@@ -261,10 +261,14 @@ app.post('/api/auth/signup', rateLimit(5, 3600), (req, res) => {
   // Self-serve: account is active immediately with a zero minute balance so the
   // customer can sign in and buy a prepaid pack right away.
   const user = db.createUser({ email, password, org, contact, phone, note, status: 'active' });
+  const token = db.createSession(user.id); // log them straight in
+  // Durability: on serverless the instance can freeze right after the response,
+  // so await the shared-store write before replying or the new user + session
+  // would not exist on the next request (which may hit another instance).
+  await db.flush().catch(() => {});
   notifyNewLead(user);            // fire-and-forget push alert (ntfy)
   sendAccessRequestEmails(user);  // fire-and-forget Resend emails (admin + welcome)
   onNewLead(user);                // fire-and-forget integration fan-out (Sheets/webhook/Slack/WhatsApp)
-  const token = db.createSession(user.id); // log them straight in
   res.setHeader('Set-Cookie', `mnb_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=1209600`);
   res.json({ ok: true, activated: true, message: 'Your account is ready! Taking you to your dashboard...' });
 });
@@ -459,6 +463,7 @@ app.post('/api/pay/create-order', rateLimit(20, 3600), async (req, res) => {
       return res.status(502).json({ error: (data && data.message) || 'Could not start the payment. Please try again.' });
     }
     db.saveOrder({ orderId, userId: user.id, amount, currency: cur, minutes, rate, status: 'CREATED', credited: false, createdAt: new Date().toISOString() });
+    await db.flush().catch(() => {}); // order must be durable so the webhook (another instance) can find + credit it
     res.json({ ok: true, order_id: orderId, payment_session_id: data.payment_session_id, mode: CF_ENV });
   } catch (e) {
     console.error('Cashfree create-order error:', e.message);
@@ -477,7 +482,7 @@ app.get('/api/pay/status/:orderId', async (req, res) => {
     const resp = await fetch(`${CF_BASE}/orders/${encodeURIComponent(order.orderId)}`, { headers: cfHeaders() });
     const data = await resp.json().catch(() => ({}));
     const paid = !!(data && data.order_status === 'PAID');
-    if (paid) creditOrderOnce(order);
+    if (paid) { creditOrderOnce(order); await db.flush().catch(() => {}); }
     res.json({ ok: true, status: paid ? 'PAID' : (data && data.order_status) || order.status, credited: !!order.credited, minutes: order.minutes });
   } catch (e) {
     console.error('Cashfree status error:', e.message);
@@ -486,7 +491,7 @@ app.get('/api/pay/status/:orderId', async (req, res) => {
 });
 
 // Cashfree webhook - HMAC-signature verified, credits idempotently.
-app.post('/api/pay/webhook', (req, res) => {
+app.post('/api/pay/webhook', async (req, res) => {
   try {
     if (!CF_SECRET) return res.status(503).end();
     const signature = req.get('x-webhook-signature') || '';
@@ -502,7 +507,7 @@ app.post('/api/pay/webhook', (req, res) => {
     const orderId = body && body.data && body.data.order && body.data.order.order_id;
     if (orderId && /PAYMENT_SUCCESS/i.test(String(body.type || ''))) {
       const order = db.getOrder(orderId);
-      if (order) creditOrderOnce(order);
+      if (order) { creditOrderOnce(order); await db.flush().catch(() => {}); }
     }
     res.status(200).json({ ok: true });
   } catch (e) {
@@ -511,7 +516,7 @@ app.post('/api/pay/webhook', (req, res) => {
   }
 });
 
-app.post('/api/auth/login', rateLimit(20, 900), (req, res) => {
+app.post('/api/auth/login', rateLimit(20, 900), async (req, res) => {
   const { email, password } = req.body || {};
   const user = email && db.findUserByEmail(email);
   if (!user || !db.verifyPassword(password || '', user.passHash)) {
@@ -520,6 +525,7 @@ app.post('/api/auth/login', rateLimit(20, 900), (req, res) => {
   if (user.status === 'pending') return res.status(403).json({ error: 'Your access request is still pending approval' });
   if (user.status !== 'active') return res.status(403).json({ error: 'Your access has been revoked' });
   const token = db.createSession(user.id);
+  await db.flush().catch(() => {}); // durable write before responding (serverless-safe)
   res.setHeader('Set-Cookie', `mnb_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=1209600`);
   res.json({ ok: true });
 });
@@ -531,10 +537,11 @@ app.post('/api/auth/logout', (req, res) => {
 });
 
 // One-click read-only demo login (no password) \u2014 powers "View live demo".
-app.post('/api/auth/demo', rateLimit(30, 3600), (req, res) => {
+app.post('/api/auth/demo', rateLimit(30, 3600), async (req, res) => {
   const u = db.getDemoUser();
   if (!u) return res.status(503).json({ error: 'Demo is warming up, please try again in a moment.' });
   const token = db.createSession(u.id);
+  await db.flush().catch(() => {}); // durable write before responding (serverless-safe)
   res.setHeader('Set-Cookie', `mnb_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=86400`);
   res.json({ ok: true });
 });
