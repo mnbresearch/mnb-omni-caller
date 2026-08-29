@@ -113,8 +113,9 @@ function createUser({ email, password, org, role = 'client', status = 'pending',
     numberIds: [],
     minuteCap: 0,
     agentCap: 5,
-    ratePerMin: 0,   // per-account price/min in INR; 0 = use global CLIENT_RATE_INR
-    minReloadInr: 0, // per-account minimum reload in INR; 0 = default (10x rate)
+    currency: 'INR', // per-account billing currency: 'INR' or 'USD'
+    ratePerMin: 0,   // per-account price/min in the account currency; 0 = global default
+    minReloadInr: 0, // per-account minimum reload in the account currency; 0 = default (10x rate)
     createdAt: new Date().toISOString(),
   };
   state.users.push(user);

@@ -316,11 +316,19 @@ const CF_READY = !!(CF_APP_ID && CF_SECRET);
 // Client price per minute (INR). Override anytime with the CLIENT_RATE_INR
 // env var - no code change needed. Defaults to Rs 6/min.
 const RATE_INR = Math.max(0.5, Number(process.env.CLIENT_RATE_INR || 6));
-// Per-account pricing: admin can set a custom rate/min and minimum reload on
-// each client. Falls back to the global rate. Minimum reload defaults to 10x
-// the rate. Balances warn at 10% remaining and hard-block at 5% remaining.
-function userRate(u) { const r = Number(u && u.ratePerMin) || 0; return r > 0 ? r : RATE_INR; }
-function userMinReload(u) { const m = Number(u && u.minReloadInr) || 0; return m > 0 ? m : Math.max(1, Math.round(userRate(u) * 10)); }
+// Foreign (USD) default per-minute price. Override with CLIENT_RATE_USD.
+// Defaults to $0.60/min so overseas clients can be billed in dollars while
+// Indian clients stay in rupees - a currency the admin sets per account.
+const RATE_USD = Math.max(0.05, Number(process.env.CLIENT_RATE_USD || 0.6));
+// Per-account pricing: admin sets each client's CURRENCY (INR or USD), a custom
+// rate/min, and a minimum reload. Rate falls back to the global rate for that
+// currency. Minimum reload defaults to 10x the rate. Balances warn at 10%
+// remaining and hard-block at 5% remaining.
+function userCurrency(u) { return (u && String(u.currency).toUpperCase() === 'USD') ? 'USD' : 'INR'; }
+function curSymbol(cur) { return cur === 'USD' ? '$' : 'Rs '; }
+function roundAmt(cur, n) { const x = Number(n) || 0; return cur === 'USD' ? Math.round(x * 100) / 100 : Math.round(x); }
+function userRate(u) { const r = Number(u && u.ratePerMin) || 0; if (r > 0) return r; return userCurrency(u) === 'USD' ? RATE_USD : RATE_INR; }
+function userMinReload(u) { const m = Number(u && u.minReloadInr) || 0; if (m > 0) return m; const cur = userCurrency(u); return roundAmt(cur, Math.max(cur === 'USD' ? 1 : 1, userRate(u) * 10)); }
 const WARN_PCT = 10, BLOCK_PCT = 5;
 function reloadState(cap, used) {
   cap = Number(cap) || 0; used = Number(used) || 0;
@@ -390,10 +398,11 @@ function creditOrderOnce(order) {
 // suggested top-up amounts (each shown with the minutes it buys).
 app.get('/api/pay/plans', (req, res) => {
   const user = currentUser(req) || {};
+  const cur = userCurrency(user);
   const rate = userRate(user);
   const minReload = userMinReload(user);
-  const presets = [minReload, minReload * 3, minReload * 5, minReload * 10].map((a) => ({ amount: a, minutes: Math.floor(a / rate) }));
-  res.json({ ready: CF_READY, mode: CF_ENV, ratePerMin: rate, minReload, currency: 'INR', presets });
+  const presets = [minReload, minReload * 3, minReload * 5, minReload * 10].map((a) => ({ amount: roundAmt(cur, a), minutes: Math.floor(roundAmt(cur, a) / rate) }));
+  res.json({ ready: CF_READY, mode: CF_ENV, ratePerMin: rate, minReload, currency: cur, symbol: curSymbol(cur), presets });
 });
 
 // A client's own purchase history (receipts).
@@ -412,11 +421,13 @@ app.post('/api/pay/create-order', rateLimit(20, 3600), async (req, res) => {
   if (!user) return res.status(401).json({ error: 'Please sign in to make a purchase.' });
   if (user.demo) return res.status(403).json({ error: 'The demo account cannot make purchases.' });
   if (!CF_READY) return res.status(503).json({ error: 'Payments are not configured yet. Please contact support.' });
+  const cur = userCurrency(user);
+  const sym = curSymbol(cur);
   const rate = userRate(user);
   const minReload = userMinReload(user);
-  const amount = Math.round(Number((req.body || {}).amount || 0));
+  const amount = roundAmt(cur, Number((req.body || {}).amount || 0));
   if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: 'Please enter a reload amount.' });
-  if (amount < minReload) return res.status(400).json({ error: `The minimum reload is Rs ${minReload}.` });
+  if (amount < minReload) return res.status(400).json({ error: `The minimum reload is ${sym}${minReload}.` });
   if (amount > 1000000) return res.status(400).json({ error: 'That amount is too large. Please contact us for large reloads.' });
   const minutes = Math.floor(amount / rate);
   if (minutes < 1) return res.status(400).json({ error: 'That amount is too small for any minutes.' });
@@ -427,7 +438,7 @@ app.post('/api/pay/create-order', rateLimit(20, 3600), async (req, res) => {
   const payload = {
     order_id: orderId,
     order_amount: amount,
-    order_currency: 'INR',
+    order_currency: cur,
     customer_details: {
       customer_id: 'u_' + user.id,
       customer_name: String(user.contact || user.org || 'MNB Customer').slice(0, 100),
@@ -438,7 +449,7 @@ app.post('/api/pay/create-order', rateLimit(20, 3600), async (req, res) => {
       return_url: `${base}/app?order_id={order_id}`,
       notify_url: `${base}/api/pay/webhook`,
     },
-    order_note: `Reload ${minutes} min at Rs ${rate}/min`,
+    order_note: `Reload ${minutes} min at ${sym}${rate}/min`,
   };
   try {
     const resp = await fetch(`${CF_BASE}/orders`, { method: 'POST', headers: cfHeaders(), body: JSON.stringify(payload) });
@@ -447,7 +458,7 @@ app.post('/api/pay/create-order', rateLimit(20, 3600), async (req, res) => {
       console.error('Cashfree create-order failed:', resp.status, data && data.message);
       return res.status(502).json({ error: (data && data.message) || 'Could not start the payment. Please try again.' });
     }
-    db.saveOrder({ orderId, userId: user.id, amount, currency: 'INR', minutes, rate, status: 'CREATED', credited: false, createdAt: new Date().toISOString() });
+    db.saveOrder({ orderId, userId: user.id, amount, currency: cur, minutes, rate, status: 'CREATED', credited: false, createdAt: new Date().toISOString() });
     res.json({ ok: true, order_id: orderId, payment_session_id: data.payment_session_id, mode: CF_ENV });
   } catch (e) {
     console.error('Cashfree create-order error:', e.message);
@@ -585,6 +596,7 @@ app.get('/api/me', async (req, res) => {
       minuteCap: user.minuteCap, usedMinutes: usage,
       remainingMinutes: (usage != null) ? Math.max(0, (Number(user.minuteCap) || 0) - usage) : null,
       ratePerMin: userRate(user), minReload: userMinReload(user),
+      currency: userCurrency(user), symbol: curSymbol(userCurrency(user)),
       lowBalance: (usage != null) ? reloadState(user.minuteCap, usage).low : false,
       reloadNeeded: (usage != null) ? reloadState(user.minuteCap, usage).blocked : false,
       agentIds: user.agentIds || [], numberIds: user.numberIds || [],
@@ -893,12 +905,13 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
     id: u.id, email: u.email, org: u.org, role: u.role, status: u.status,
     contact: u.contact || '', phone: u.phone || '', note: u.note || '', businessType: u.businessType || 'general',
     agentIds: u.agentIds, numberIds: u.numberIds, minuteCap: u.minuteCap, agentCap: u.agentCap || 5, createdAt: u.createdAt,
+    ratePerMin: Number(u.ratePerMin) || 0, minReloadInr: Number(u.minReloadInr) || 0, currency: userCurrency(u),
     usedMinutes: u.role === 'client' && u.status === 'active' ? await getUsageMinutes(u).catch(() => null) : null,
   })));
   res.json({ users });
 });
 app.post('/api/admin/users/:id/update', adminOnly, (req, res) => {
-  const { status, agentIds, numberIds, minuteCap, agentCap, ratePerMin, minReloadInr } = req.body || {};
+  const { status, agentIds, numberIds, minuteCap, agentCap, ratePerMin, minReloadInr, currency } = req.body || {};
   const patch = {};
   if (status) patch.status = status;
   if (Array.isArray(agentIds)) patch.agentIds = agentIds.map(Number);
@@ -907,6 +920,7 @@ app.post('/api/admin/users/:id/update', adminOnly, (req, res) => {
   if (agentCap !== undefined) patch.agentCap = Number(agentCap) || 0;
   if (ratePerMin !== undefined) patch.ratePerMin = Math.max(0, Number(ratePerMin) || 0);
   if (minReloadInr !== undefined) patch.minReloadInr = Math.max(0, Number(minReloadInr) || 0);
+  if (currency !== undefined) patch.currency = (String(currency).toUpperCase() === 'USD') ? 'USD' : 'INR';
   const u = db.updateUser(req.params.id, patch);
   if (!u) return res.status(404).json({ error: 'User not found' });
   usageCache.delete(u.id);
