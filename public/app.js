@@ -307,11 +307,18 @@ function adminUserRow(u) {
     <div>${numberChecks}</div>
     <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:6px">
       <div>
-        <label>Rate per minute <span class="muted">(&#8377;/min; 0 = global default)</span></label>
-        <input type="number" id="rate-${u.id}" value="${u.ratePerMin != null ? u.ratePerMin : 0}" min="0" step="0.5" style="max-width:150px" />
+        <label>Currency <span class="muted">(billing + checkout)</span></label>
+        <select id="cur-${u.id}" style="max-width:150px">
+          <option value="INR" ${u.currency !== 'USD' ? 'selected' : ''}>INR (&#8377;)</option>
+          <option value="USD" ${u.currency === 'USD' ? 'selected' : ''}>USD ($)</option>
+        </select>
       </div>
       <div>
-        <label>Minimum reload <span class="muted">(&#8377;; 0 = 10&#215; rate)</span></label>
+        <label>Rate per minute <span class="muted">(in the chosen currency; 0 = global default)</span></label>
+        <input type="number" id="rate-${u.id}" value="${u.ratePerMin != null ? u.ratePerMin : 0}" min="0" step="0.1" style="max-width:150px" />
+      </div>
+      <div>
+        <label>Minimum reload <span class="muted">(0 = 10&#215; rate)</span></label>
         <input type="number" id="minr-${u.id}" value="${u.minReloadInr != null ? u.minReloadInr : 0}" min="0" step="1" style="max-width:150px" />
       </div>
     </div>
@@ -333,8 +340,10 @@ async function adminSave(userId, status) {
   const ratePerMin = rEl ? (Number(rEl.value) || 0) : undefined;
   const mrEl = $('minr-' + userId);
   const minReloadInr = mrEl ? (Number(mrEl.value) || 0) : undefined;
+  const curEl = $('cur-' + userId);
+  const currency = curEl ? curEl.value : undefined;
   try {
-    await api(`/admin/users/${userId}/update`, { method: 'POST', body: { status, agentIds, numberIds, minuteCap, agentCap, ratePerMin, minReloadInr } });
+    await api(`/admin/users/${userId}/update`, { method: 'POST', body: { status, agentIds, numberIds, minuteCap, agentCap, ratePerMin, minReloadInr, currency } });
     toast(status === 'rejected' ? 'Access revoked' : 'Saved');
     loadAdmin();
   } catch (e) { toast('Save failed: ' + e.message, 5000); }
@@ -3623,13 +3632,17 @@ async function detachNumber(numberId) {
 
     if (user.demo) { body.innerHTML = balance + '<div class="v20-note">You are exploring the read-only demo. Sign up for your own account to reload minutes.</div>'; return; }
 
-    var rate = Number(pd.ratePerMin || user.ratePerMin || 6);
-    var minReload = Number(pd.minReload || user.minReload || Math.max(1, Math.round(rate * 10)));
+    var cur = pd.currency || user.currency || 'INR';
+    var sym = pd.symbol || (cur === 'USD' ? '$' : '&#8377;');
+    var isUsd = cur === 'USD';
+    function fmt(n) { try { return Number(n).toLocaleString(isUsd ? 'en-US' : 'en-IN', isUsd ? { minimumFractionDigits: 0, maximumFractionDigits: 2 } : {}); } catch (e) { return String(n); } }
+    var rate = Number(pd.ratePerMin || user.ratePerMin || (isUsd ? 0.6 : 6));
+    var minReload = Number(pd.minReload || user.minReload || Math.max(1, isUsd ? Math.round(rate * 10 * 100) / 100 : Math.round(rate * 10)));
     curRate = rate; curMin = minReload;
 
     if (!pd || !pd.ready) {
       body.innerHTML = alert + balance +
-        '<div class="v20-rate"><div class="m"><span>Your rate</span><b>&#8377;' + E(rate) + '/min</b></div><div class="m"><span>Minimum reload</span><b>&#8377;' + E(inr(minReload)) + '</b></div></div>' +
+        '<div class="v20-rate"><div class="m"><span>Your rate</span><b>' + sym + E(rate) + '/min</b></div><div class="m"><span>Minimum reload</span><b>' + sym + E(fmt(minReload)) + '</b></div></div>' +
         '<div class="v20-note">Online payments are being set up. To reload now, contact us at <a href="/contact.html" style="color:var(--accent2,#ffab5e)">contact@mnbresearch.com</a> and we will help you right away.</div>';
       return;
     }
@@ -3642,30 +3655,30 @@ async function detachNumber(numberId) {
     ];
 
     var presetHtml = presets.map(function (p, i) {
-      return '<div class="v20-preset' + (i === 0 ? ' sel' : '') + '" data-amt="' + E(p.amount) + '"><b>&#8377;' + E(inr(p.amount)) + '</b><span>' + E(inr(p.minutes)) + ' min</span></div>';
+      return '<div class="v20-preset' + (i === 0 ? ' sel' : '') + '" data-amt="' + E(p.amount) + '"><b>' + sym + E(fmt(p.amount)) + '</b><span>' + E(fmt(p.minutes)) + ' min</span></div>';
     }).join('');
 
     body.innerHTML = alert + balance +
       '<div class="v20-rate">' +
-        '<div class="m"><span>Your rate</span><b>&#8377;' + E(rate) + '/min</b></div>' +
-        '<div class="m"><span>Minimum reload</span><b>&#8377;' + E(inr(minReload)) + '</b></div>' +
-        '<div class="m"><span>Buys you</span><b>' + E(inr(Math.floor(minReload / rate))) + ' min</b></div>' +
+        '<div class="m"><span>Your rate</span><b>' + sym + E(rate) + '/min</b></div>' +
+        '<div class="m"><span>Minimum reload</span><b>' + sym + E(fmt(minReload)) + '</b></div>' +
+        '<div class="m"><span>Buys you</span><b>' + E(fmt(Math.floor(minReload / rate))) + ' min</b></div>' +
       '</div>' +
       '<h3 style="margin:4px 0 10px;font-size:16px">Choose a reload amount</h3>' +
       '<div class="v20-presets">' + presetHtml + '</div>' +
       '<div class="v20-custom">' +
-        '<div><label>Or enter a custom amount (&#8377;)</label><input id="v20amt" type="number" min="' + E(minReload) + '" step="1" value="' + E(minReload) + '"></div>' +
-        '<div class="v20-mins" id="v20mins">= <b>' + E(inr(Math.floor(minReload / rate))) + '</b> minutes</div>' +
+        '<div><label>Or enter a custom amount (' + sym.trim() + ')</label><input id="v20amt" type="number" min="' + E(minReload) + '" step="' + (isUsd ? '0.01' : '1') + '" value="' + E(minReload) + '"></div>' +
+        '<div class="v20-mins" id="v20mins">= <b>' + E(fmt(Math.floor(minReload / rate))) + '</b> minutes</div>' +
         '<button class="v20-buy" id="v20reload" style="padding:12px 22px">Reload now</button>' +
       '</div>' +
-      '<div class="v20-note">Minutes are computed from your amount at &#8377;' + E(rate) + '/min and added automatically once payment is confirmed. Minimum reload is &#8377;' + E(inr(minReload)) + '. Payments processed securely by Cashfree. See our <a href="/refund.html" style="color:var(--accent2,#ffab5e)">Refund policy</a>.</div>';
+      '<div class="v20-note">Minutes are computed from your amount at ' + sym + E(rate) + '/min and added automatically once payment is confirmed. Minimum reload is ' + sym + E(fmt(minReload)) + '. Payments processed securely by Cashfree. See our <a href="/refund.html" style="color:var(--accent2,#ffab5e)">Refund policy</a>.</div>';
 
     var amtInput = document.getElementById('v20amt');
     var minsEl = document.getElementById('v20mins');
     function refreshMins() {
       var v = Number(amtInput.value) || 0;
       var m = v > 0 ? Math.floor(v / rate) : 0;
-      minsEl.innerHTML = '= <b>' + inr(m) + '</b> minutes' + (v > 0 && v < minReload ? ' <span style="color:#ffb0a0">(below &#8377;' + inr(minReload) + ' minimum)</span>' : '');
+      minsEl.innerHTML = '= <b>' + fmt(m) + '</b> minutes' + (v > 0 && v < minReload ? ' <span style="color:#ffb0a0">(below ' + sym + fmt(minReload) + ' minimum)</span>' : '');
     }
     amtInput.addEventListener('input', function () { body.querySelectorAll('.v20-preset').forEach(function (x) { x.classList.remove('sel'); }); refreshMins(); });
     body.querySelectorAll('.v20-preset').forEach(function (p) {
@@ -3675,8 +3688,8 @@ async function detachNumber(numberId) {
       });
     });
     document.getElementById('v20reload').addEventListener('click', function () {
-      var amt = Math.round(Number(amtInput.value) || 0);
-      if (amt < minReload) { T('Minimum reload is Rs ' + inr(minReload)); amtInput.focus(); return; }
+      var amt = isUsd ? (Math.round((Number(amtInput.value) || 0) * 100) / 100) : Math.round(Number(amtInput.value) || 0);
+      if (amt < minReload) { T('Minimum reload is ' + sym.trim() + ' ' + fmt(minReload)); amtInput.focus(); return; }
       buy(amt, document.getElementById('v20reload'));
     });
   }
@@ -3785,7 +3798,7 @@ async function detachNumber(numberId) {
       '<div class="v21-kv"><span>Email</span><span>' + E(u.email || '') + '</span></div>' +
       '<div class="v21-kv"><span>Organization</span><span>' + E(u.org || '') + '</span></div>' +
       '<div class="v21-kv"><span>Plan</span><span>' + E(u.plan || 'prepaid') + '</span></div>' +
-      (u.ratePerMin != null ? '<div class="v21-kv"><span>Your rate</span><span>&#8377;' + E(u.ratePerMin) + '/min</span></div>' : '') +
+      (u.ratePerMin != null ? '<div class="v21-kv"><span>Your rate</span><span>' + (u.symbol || (u.currency === 'USD' ? '$' : '&#8377;')) + E(u.ratePerMin) + '/min</span></div>' : '') +
       '<div class="v21-kv"><span>Minute balance</span><span><b>' + (u.remainingMinutes != null ? E(u.remainingMinutes) : E(u.minuteCap || 0)) + '</b> remaining</span></div>' +
       '</div>';
     var pw = u.demo
@@ -3824,8 +3837,9 @@ async function detachNumber(numberId) {
     var rows = orders.map(function (o) {
       var d = o.createdAt ? new Date(o.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
       var paid = o.status === 'PAID' || o.credited;
-      var rate = o.rate ? ('&#8377;' + E(o.rate) + '/min') : '';
-      return '<tr><td>' + E(d) + '</td><td>&#8377;' + E(o.amount) + '</td><td>' + E(o.minutes) + ' min</td><td>' + rate + '</td>' +
+      var os = (o.currency === 'USD') ? '$' : '&#8377;';
+      var rate = o.rate ? (os + E(o.rate) + '/min') : '';
+      return '<tr><td>' + E(d) + '</td><td>' + os + E(o.amount) + '</td><td>' + E(o.minutes) + ' min</td><td>' + rate + '</td>' +
         '<td><span class="v21-badge ' + (paid ? 'v21-paid' : 'v21-pend') + '">' + (paid ? 'Paid' : E(o.status || 'Pending')) + '</span></td></tr>';
     }).join('');
     el.innerHTML = '<table class="v21-tbl"><thead><tr><th>Date</th><th>Amount</th><th>Minutes</th><th>Rate</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table>';
@@ -3968,7 +3982,7 @@ async function detachNumber(numberId) {
     vGS.innerHTML = '<header class="view-head"><h2>Get started</h2><p class="muted">Four quick steps to your first live AI call.</p></header><div id="v22body"><p class="muted">Checking your setup...</p></div>';
     var s = await stats();
     var steps = [
-      { done: s.cap > 0, t: 'Buy calling minutes', d: 'Add a prepaid pack (from &#8377;3,000 for 500 minutes at &#8377;6/min). Minutes are used as you call and never expire monthly.', b: 'Buy minutes', a: 'billing' },
+      { done: s.cap > 0, t: 'Top up calling minutes', d: 'Pay as you go at &#8377;6/min - top up any amount from &#8377;60. Minutes are used as you call and never expire monthly.', b: 'Top up', a: 'billing' },
       { done: s.agents > 0, t: 'Build your AI agent', d: 'Give it a purpose, a voice and your knowledge base. It learns how to greet, qualify and close - no coding. <button class="v22-btn ghost" data-act="reqagent" style="margin-top:9px;padding:6px 12px;font-size:12px">Or have MNB build it for you</button>', b: 'Create agent', a: 'studio' },
       { done: s.numbers > 0, t: 'Get your calling number', d: 'Request a dedicated caller-ID number. We provision and attach it to your agent, usually within one business day.', b: 'Request number', a: 'reqnum' },
       { done: s.calls > 0, t: 'Place your first call', d: 'Enter a number and dispatch. Your agent talks, listens and adapts in real time, then returns a transcript, summary and recording.', b: 'Make a call', a: 'call' }
