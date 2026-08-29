@@ -305,10 +305,21 @@ function adminUserRow(u) {
     <div>${agentChecks}</div>
     <label>Delegated phone numbers</label>
     <div>${numberChecks}</div>
-    <label>Monthly minute limit <span class="muted">(0 = unlimited)</span></label>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:6px">
+      <div>
+        <label>Rate per minute <span class="muted">(&#8377;/min; 0 = global default)</span></label>
+        <input type="number" id="rate-${u.id}" value="${u.ratePerMin != null ? u.ratePerMin : 0}" min="0" step="0.5" style="max-width:150px" />
+      </div>
+      <div>
+        <label>Minimum reload <span class="muted">(&#8377;; 0 = 10&#215; rate)</span></label>
+        <input type="number" id="minr-${u.id}" value="${u.minReloadInr != null ? u.minReloadInr : 0}" min="0" step="1" style="max-width:150px" />
+      </div>
+    </div>
+    <label>Prepaid minute balance <span class="muted">(total minutes on the account; 0 = calling blocked until reload)</span></label>
     <input type="number" id="cap-${u.id}" value="${u.minuteCap}" min="0" style="max-width:160px" />
     <label>Agent limit <span class="muted">(max agents this client can create)</span></label>
     <input type="number" id="acap-${u.id}" value="${u.agentCap != null ? u.agentCap : 5}" min="0" style="max-width:160px" />
+    <p class="muted" style="font-size:.85em;margin-top:8px">Client reloads in multiples of the minimum. Warning shows under 10% balance; calling is blocked under 5% until they reload.</p>
   </div>`;
 }
 
@@ -318,8 +329,12 @@ async function adminSave(userId, status) {
   const minuteCap = Number($('cap-' + userId).value) || 0;
   const acEl = $('acap-' + userId);
   const agentCap = acEl ? (Number(acEl.value) || 0) : undefined;
+  const rEl = $('rate-' + userId);
+  const ratePerMin = rEl ? (Number(rEl.value) || 0) : undefined;
+  const mrEl = $('minr-' + userId);
+  const minReloadInr = mrEl ? (Number(mrEl.value) || 0) : undefined;
   try {
-    await api(`/admin/users/${userId}/update`, { method: 'POST', body: { status, agentIds, numberIds, minuteCap, agentCap } });
+    await api(`/admin/users/${userId}/update`, { method: 'POST', body: { status, agentIds, numberIds, minuteCap, agentCap, ratePerMin, minReloadInr } });
     toast(status === 'rejected' ? 'Access revoked' : 'Saved');
     loadAdmin();
   } catch (e) { toast('Save failed: ' + e.message, 5000); }
@@ -3536,7 +3551,21 @@ async function detachNumber(numberId) {
     '.v20-buy:disabled{opacity:.6;cursor:not-allowed}' +
     '.v20-alt{border:1px solid var(--border,#2b2b2f);background:transparent;color:var(--text,#eee);border-radius:10px;padding:13px;font-size:15px;font-weight:700;cursor:pointer;text-align:center;text-decoration:none;display:block}' +
     '.v20-note{background:var(--panel-2,#1d1d20);border:1px solid var(--border,#2b2b2f);border-radius:12px;padding:14px 16px;margin-top:16px;color:var(--muted,#9a958c);font-size:13px}' +
-    '.v20-ok{background:rgba(67,185,127,.14);border:1px solid rgba(67,185,127,.4);color:#8fe4b8;border-radius:12px;padding:14px 16px;margin-bottom:14px;font-size:14.5px}';
+    '.v20-ok{background:rgba(67,185,127,.14);border:1px solid rgba(67,185,127,.4);color:#8fe4b8;border-radius:12px;padding:14px 16px;margin-bottom:14px;font-size:14.5px}' +
+    '.v20-rate{display:flex;gap:26px;flex-wrap:wrap;background:var(--panel,#141416);border:1px solid var(--border,#2b2b2f);border-radius:14px;padding:18px 20px;margin-bottom:16px}' +
+    '.v20-rate .m{display:flex;flex-direction:column}.v20-rate .m span{font-size:12px;color:var(--muted,#9a958c);text-transform:uppercase;letter-spacing:.04em}.v20-rate .m b{font-size:22px;margin-top:3px}' +
+    '.v20-presets{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:6px 0 16px}' +
+    '@media(max-width:760px){.v20-presets{grid-template-columns:repeat(2,1fr)}}' +
+    '.v20-preset{background:var(--panel,#141416);border:1px solid var(--border,#2b2b2f);border-radius:13px;padding:16px 12px;cursor:pointer;text-align:center;transition:border-color .15s,box-shadow .15s}' +
+    '.v20-preset:hover,.v20-preset.sel{border-color:var(--accent,#ff7a18);box-shadow:0 10px 30px rgba(255,122,24,.10)}' +
+    '.v20-preset b{font-size:21px;display:block}.v20-preset span{font-size:12.5px;color:var(--muted,#9a958c)}' +
+    '.v20-custom{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-top:6px}' +
+    '.v20-custom label{display:block;font-size:12px;color:var(--muted,#9a958c);margin-bottom:5px;font-weight:600}' +
+    '.v20-custom input{background:var(--bg,#0e0f12);border:1px solid var(--border,#2b2b2f);color:var(--text,#eee);border-radius:9px;padding:12px 13px;font-size:15px;width:200px;font-family:inherit}' +
+    '.v20-custom input:focus{outline:none;border-color:var(--accent,#ff7a18)}' +
+    '.v20-mins{font-size:13.5px;color:var(--muted,#9a958c);align-self:center}.v20-mins b{color:var(--text,#eee)}' +
+    '.v20-req{background:linear-gradient(135deg,rgba(255,90,60,.16),rgba(255,140,90,.08));border:1px solid rgba(255,110,80,.45);color:#ffd0c0;border-radius:12px;padding:14px 16px;margin-bottom:16px;font-size:14.5px}.v20-req b{color:#fff}' +
+    '.v20-warn{background:linear-gradient(135deg,rgba(255,122,24,.15),rgba(255,179,71,.07));border:1px solid rgba(255,122,24,.4);color:#ffd9b3;border-radius:12px;padding:13px 16px;margin-bottom:16px;font-size:14px}';
   document.head.appendChild(css);
 
   function mkView(id) { var m = document.querySelector('main.main') || (document.getElementById('view-overview') || {}).parentNode; if (!m) return null; var s = document.createElement('section'); s.id = 'view-' + id; s.className = 'view hidden'; m.appendChild(s); return s; }
@@ -3568,53 +3597,94 @@ async function detachNumber(numberId) {
 
   async function getMe() { if (meCache) return meCache; try { meCache = await fetch('/api/me', { cache: 'no-store' }).then(function (r) { return r.json(); }); } catch (e) { meCache = {}; } return meCache; }
 
+  var curRate = 6, curMin = 60; // filled from /api/pay/plans
+
+  function inr(n) { try { return Number(n).toLocaleString('en-IN'); } catch (e) { return String(n); } }
+
   async function loadBilling() {
     if (!vB) return;
-    vB.innerHTML = '<header class="view-head"><h2>Billing</h2><p class="muted">Top up call minutes for your organization. Secure payments by Cashfree.</p></header><div id="v20body"><p class="muted">Loading plans...</p></div>';
+    vB.innerHTML = '<header class="view-head"><h2>Billing</h2><p class="muted">Reload calling minutes for your account. Secure payments by Cashfree.</p></header><div id="v20body"><p class="muted">Loading your account...</p></div>';
     var body = document.getElementById('v20body');
     var meResp = await getMe();
     var user = (meResp && meResp.user) || {};
     var pd;
-    try { pd = await fetch('/api/pay/plans').then(function (r) { return r.json(); }); } catch (e) { pd = { plans: [] }; }
+    try { pd = await fetch('/api/pay/plans').then(function (r) { return r.json(); }); } catch (e) { pd = {}; }
 
-    var banner = '';
     var used = (user.usedMinutes != null) ? user.usedMinutes : null;
     var cap = (user.minuteCap != null) ? user.minuteCap : null;
     var rem = (user.remainingMinutes != null) ? user.remainingMinutes : ((cap != null && used != null) ? Math.max(0, cap - used) : null);
-    if (cap != null) banner = '<div class="v20-note" style="margin-top:0;margin-bottom:14px">Minute balance: <b style="color:var(--text,#eee)">' + (rem != null ? E(rem) : E(cap)) + ' remaining</b>' + (used != null ? ' &#183; ' + E(used) + ' used of ' + E(cap) + ' purchased' : '') + '</div>';
 
-    if (user.demo) { body.innerHTML = banner + '<div class="v20-note">You are exploring the read-only demo. Sign up for your own account to purchase minutes.</div>'; return; }
-    if (!pd || !pd.ready) { body.innerHTML = banner + '<div class="v20-note">Online payments are being set up. To buy minutes now, contact us at <a href="/contact.html" style="color:var(--accent2,#ffab5e)">contact@mnbresearch.com</a> and we will help you right away.</div>'; return; }
+    // Mandatory-reload / low-balance messaging driven by server flags.
+    var alert = '';
+    if (user.reloadNeeded) alert = '<div class="v20-req">Reload required. You have used more than 95% of your balance, so calling is paused until you reload. <b>Add minutes below to resume.</b></div>';
+    else if (user.lowBalance) alert = '<div class="v20-warn">Your balance is running low (under 10% left). Reload soon to avoid interruption.</div>';
 
-    var plans = pd.plans || [];
-    var feat = {
-      starter: ['500 call minutes', '1 trained agent', 'Knowledge base & transcripts', 'Analytics dashboard', 'Email support'],
-      growth: ['1,500 call minutes', 'Up to 5 agents', 'Bulk call campaigns', 'Dedicated phone number', 'Priority support']
-    };
-    var cards = plans.map(function (p) {
-      var pop = p.id === 'growth' ? ' pop' : '';
-      var tag = p.id === 'growth' ? '<span class="v20-tag">MOST POPULAR</span>' : '';
-      var li = (feat[p.id] || [p.minutes + ' call minutes']).map(function (f) { return '<li>' + E(f) + '</li>'; }).join('');
-      return '<div class="v20-tier' + pop + '">' + tag + '<h3>' + E(p.name) + '</h3>' +
-        '<div class="v20-price">&#8377;' + E(Number(p.amount).toLocaleString('en-IN')) + ' <span>one-time</span></div>' +
-        '<ul>' + li + '</ul>' +
-        '<button class="v20-buy" data-plan="' + E(p.id) + '">Buy ' + E(p.name) + '</button></div>';
+    var balance = '<div class="v20-note" style="margin-top:0;margin-bottom:16px">Minute balance: <b style="color:var(--text,#eee)">' + (rem != null ? E(rem) : E(cap || 0)) + ' remaining</b>' + (used != null && cap != null ? ' &#183; ' + E(used) + ' used of ' + E(cap) + ' purchased' : '') + '</div>';
+
+    if (user.demo) { body.innerHTML = balance + '<div class="v20-note">You are exploring the read-only demo. Sign up for your own account to reload minutes.</div>'; return; }
+
+    var rate = Number(pd.ratePerMin || user.ratePerMin || 6);
+    var minReload = Number(pd.minReload || user.minReload || Math.max(1, Math.round(rate * 10)));
+    curRate = rate; curMin = minReload;
+
+    if (!pd || !pd.ready) {
+      body.innerHTML = alert + balance +
+        '<div class="v20-rate"><div class="m"><span>Your rate</span><b>&#8377;' + E(rate) + '/min</b></div><div class="m"><span>Minimum reload</span><b>&#8377;' + E(inr(minReload)) + '</b></div></div>' +
+        '<div class="v20-note">Online payments are being set up. To reload now, contact us at <a href="/contact.html" style="color:var(--accent2,#ffab5e)">contact@mnbresearch.com</a> and we will help you right away.</div>';
+      return;
+    }
+
+    var presets = (pd.presets && pd.presets.length) ? pd.presets : [
+      { amount: minReload, minutes: Math.floor(minReload / rate) },
+      { amount: minReload * 3, minutes: Math.floor(minReload * 3 / rate) },
+      { amount: minReload * 5, minutes: Math.floor(minReload * 5 / rate) },
+      { amount: minReload * 10, minutes: Math.floor(minReload * 10 / rate) }
+    ];
+
+    var presetHtml = presets.map(function (p, i) {
+      return '<div class="v20-preset' + (i === 0 ? ' sel' : '') + '" data-amt="' + E(p.amount) + '"><b>&#8377;' + E(inr(p.amount)) + '</b><span>' + E(inr(p.minutes)) + ' min</span></div>';
     }).join('');
-    // Scale card -> contact
-    cards += '<div class="v20-tier"><h3>Scale</h3><div class="v20-price">Custom</div>' +
-      '<ul><li>High-volume minute packs (fair-use)</li><li>Unlimited agents & numbers</li><li>Multi-client delegation</li><li>Voice cloning & custom flows</li><li>White-glove onboarding</li></ul>' +
-      '<a class="v20-alt" href="/contact.html">Talk to us</a></div>';
 
-    body.innerHTML = banner + '<div class="v20-tiers">' + cards + '</div>' +
-      '<div class="v20-note">Payments are processed securely by Cashfree. Minutes are added to your account automatically once your payment is confirmed. See our <a href="/refund.html" style="color:var(--accent2,#ffab5e)">Refund policy</a>.</div>';
+    body.innerHTML = alert + balance +
+      '<div class="v20-rate">' +
+        '<div class="m"><span>Your rate</span><b>&#8377;' + E(rate) + '/min</b></div>' +
+        '<div class="m"><span>Minimum reload</span><b>&#8377;' + E(inr(minReload)) + '</b></div>' +
+        '<div class="m"><span>Buys you</span><b>' + E(inr(Math.floor(minReload / rate))) + ' min</b></div>' +
+      '</div>' +
+      '<h3 style="margin:4px 0 10px;font-size:16px">Choose a reload amount</h3>' +
+      '<div class="v20-presets">' + presetHtml + '</div>' +
+      '<div class="v20-custom">' +
+        '<div><label>Or enter a custom amount (&#8377;)</label><input id="v20amt" type="number" min="' + E(minReload) + '" step="1" value="' + E(minReload) + '"></div>' +
+        '<div class="v20-mins" id="v20mins">= <b>' + E(inr(Math.floor(minReload / rate))) + '</b> minutes</div>' +
+        '<button class="v20-buy" id="v20reload" style="padding:12px 22px">Reload now</button>' +
+      '</div>' +
+      '<div class="v20-note">Minutes are computed from your amount at &#8377;' + E(rate) + '/min and added automatically once payment is confirmed. Minimum reload is &#8377;' + E(inr(minReload)) + '. Payments processed securely by Cashfree. See our <a href="/refund.html" style="color:var(--accent2,#ffab5e)">Refund policy</a>.</div>';
 
-    body.querySelectorAll('.v20-buy').forEach(function (b) { b.addEventListener('click', function () { buy(b.getAttribute('data-plan'), b); }); });
+    var amtInput = document.getElementById('v20amt');
+    var minsEl = document.getElementById('v20mins');
+    function refreshMins() {
+      var v = Number(amtInput.value) || 0;
+      var m = v > 0 ? Math.floor(v / rate) : 0;
+      minsEl.innerHTML = '= <b>' + inr(m) + '</b> minutes' + (v > 0 && v < minReload ? ' <span style="color:#ffb0a0">(below &#8377;' + inr(minReload) + ' minimum)</span>' : '');
+    }
+    amtInput.addEventListener('input', function () { body.querySelectorAll('.v20-preset').forEach(function (x) { x.classList.remove('sel'); }); refreshMins(); });
+    body.querySelectorAll('.v20-preset').forEach(function (p) {
+      p.addEventListener('click', function () {
+        body.querySelectorAll('.v20-preset').forEach(function (x) { x.classList.remove('sel'); });
+        p.classList.add('sel'); amtInput.value = p.getAttribute('data-amt'); refreshMins();
+      });
+    });
+    document.getElementById('v20reload').addEventListener('click', function () {
+      var amt = Math.round(Number(amtInput.value) || 0);
+      if (amt < minReload) { T('Minimum reload is Rs ' + inr(minReload)); amtInput.focus(); return; }
+      buy(amt, document.getElementById('v20reload'));
+    });
   }
 
-  async function buy(planId, btn) {
+  async function buy(amount, btn) {
     if (btn) { btn.disabled = true; btn.textContent = 'Starting...'; }
     try {
-      var r = await fetch('/api/pay/create-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ planId: planId }) });
+      var r = await fetch('/api/pay/create-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount: amount }) });
       var j = await r.json().catch(function () { return {}; });
       if (!r.ok || !j.payment_session_id) { T(j.error || 'Could not start checkout'); if (btn) { btn.disabled = false; btn.textContent = 'Try again'; } return; }
       var Cashfree = await loadSdk();
@@ -3715,6 +3785,7 @@ async function detachNumber(numberId) {
       '<div class="v21-kv"><span>Email</span><span>' + E(u.email || '') + '</span></div>' +
       '<div class="v21-kv"><span>Organization</span><span>' + E(u.org || '') + '</span></div>' +
       '<div class="v21-kv"><span>Plan</span><span>' + E(u.plan || 'prepaid') + '</span></div>' +
+      (u.ratePerMin != null ? '<div class="v21-kv"><span>Your rate</span><span>&#8377;' + E(u.ratePerMin) + '/min</span></div>' : '') +
       '<div class="v21-kv"><span>Minute balance</span><span><b>' + (u.remainingMinutes != null ? E(u.remainingMinutes) : E(u.minuteCap || 0)) + '</b> remaining</span></div>' +
       '</div>';
     var pw = u.demo
@@ -3753,13 +3824,17 @@ async function detachNumber(numberId) {
     var rows = orders.map(function (o) {
       var d = o.createdAt ? new Date(o.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
       var paid = o.status === 'PAID' || o.credited;
-      return '<tr><td>' + E(d) + '</td><td>' + E((o.plan || '').charAt(0).toUpperCase() + (o.plan || '').slice(1)) + '</td><td>&#8377;' + E(o.amount) + '</td><td>' + E(o.minutes) + ' min</td>' +
+      var rate = o.rate ? ('&#8377;' + E(o.rate) + '/min') : '';
+      return '<tr><td>' + E(d) + '</td><td>&#8377;' + E(o.amount) + '</td><td>' + E(o.minutes) + ' min</td><td>' + rate + '</td>' +
         '<td><span class="v21-badge ' + (paid ? 'v21-paid' : 'v21-pend') + '">' + (paid ? 'Paid' : E(o.status || 'Pending')) + '</span></td></tr>';
     }).join('');
-    el.innerHTML = '<table class="v21-tbl"><thead><tr><th>Date</th><th>Plan</th><th>Amount</th><th>Minutes</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    el.innerHTML = '<table class="v21-tbl"><thead><tr><th>Date</th><th>Amount</th><th>Minutes</th><th>Rate</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table>';
   }
 
-  /* ---- Low-balance nudge ---- */
+  /* ---- Low-balance / mandatory-reload nudge (server-flag driven) ----
+   * lowBalance  = under 10% left  -> dismissable warning
+   * reloadNeeded = under 5% left  -> mandatory, non-dismissable (calling is
+   *               already blocked server-side until a reload is made). */
   var lowShown = false;
   async function checkLowBalance() {
     if (lowShown) return;
@@ -3768,16 +3843,23 @@ async function detachNumber(numberId) {
       var u = (me && me.user) || {};
       if (!me.authed || u.demo || u.role === 'admin') return;
       var rem = u.remainingMinutes;
-      if (rem == null || rem > 60) return;
-      if (sessionStorage.getItem('mnb_low_dismissed') === '1') return;
+      var mandatory = !!u.reloadNeeded;
+      var low = !!u.lowBalance;
+      if (!mandatory && !low) return;
+      if (!mandatory && sessionStorage.getItem('mnb_low_dismissed') === '1') return;
       lowShown = true;
       var bar = document.createElement('div'); bar.className = 'v21-low';
-      bar.innerHTML = '<span>' + (rem <= 0 ? 'You have <b>no calling minutes</b> left.' : 'Low balance: <b>' + E(rem) + ' minutes</b> left.') + '</span>' +
-        '<button id="v21buy">Buy minutes</button><button class="x" id="v21x">Dismiss</button>';
+      if (mandatory) { bar.style.background = 'linear-gradient(135deg,rgba(255,90,60,.24),rgba(255,140,90,.12))'; bar.style.borderBottom = '1px solid rgba(255,110,80,.55)'; bar.style.color = '#ffd0c0'; }
+      var msg = mandatory
+        ? 'Reload required &#8212; calling is paused. You have <b>' + (rem != null ? E(rem) : '0') + ' minutes</b> left (under 5%). Reload to resume.'
+        : 'Low balance: <b>' + (rem != null ? E(rem) : '0') + ' minutes</b> left (under 10%). Reload soon.';
+      bar.innerHTML = '<span>' + msg + '</span><button id="v21buy">Reload minutes</button>' +
+        (mandatory ? '' : '<button class="x" id="v21x">Dismiss</button>');
       var main = document.querySelector('main.main') || document.body;
       main.insertBefore(bar, main.firstChild);
       document.getElementById('v21buy').addEventListener('click', function () { window.switchView('billing'); });
-      document.getElementById('v21x').addEventListener('click', function () { try { sessionStorage.setItem('mnb_low_dismissed', '1'); } catch (e) {} bar.remove(); });
+      var x = document.getElementById('v21x');
+      if (x) x.addEventListener('click', function () { try { sessionStorage.setItem('mnb_low_dismissed', '1'); } catch (e) {} bar.remove(); });
     } catch (e) {}
   }
   setTimeout(checkLowBalance, 1500);
@@ -3899,7 +3981,15 @@ async function detachNumber(numberId) {
       '<div class="v22-prog"><i style="width:' + pct + '%"></i></div>' +
       '<p class="muted" style="margin:-12px 0 16px;font-size:13px">' + doneCount + ' of ' + steps.length + ' complete' + (allDone ? ' - you are fully set up!' : '') + '</p>' +
       steps.map(function (st, i) { return stepHtml(i + 1, st.done, st.t, st.d, st.b, st.a); }).join('') +
-      '<div class="v22-help"><b style="color:var(--text,#eee)">How it works:</b> You pay MNB Research for prepaid minutes via secure Cashfree checkout. Those minutes power calls placed by your own AI agent through your dedicated number. Manage your balance and receipts any time from the <a href="#billing" style="color:var(--accent2,#ffab5e)">Billing</a> and <a href="#account" style="color:var(--accent2,#ffab5e)">Account</a> tabs. Questions? <a href="/contact.html" style="color:var(--accent2,#ffab5e)">Contact us</a>.</div>';
+      '<div class="v22-help"><b style="color:var(--text,#eee)">How it works:</b> You pay MNB Research for prepaid minutes via secure Cashfree checkout. Those minutes power calls placed by your own AI agent through your dedicated number. Manage your balance and receipts any time from the <a href="#billing" style="color:var(--accent2,#ffab5e)">Billing</a> and <a href="#account" style="color:var(--accent2,#ffab5e)">Account</a> tabs. Questions? <a href="/contact.html" style="color:var(--accent2,#ffab5e)">Contact us</a>.</div>' +
+      '<div class="v22-help" style="margin-top:12px"><b style="color:var(--text,#eee);display:block;margin-bottom:8px">Power tools</b>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:8px">' +
+          '<button class="v22-btn" data-act="voicewidget">&#127908; Voice widget</button>' +
+          '<button class="v22-btn" data-act="testing">&#129514; Test your agent</button>' +
+          '<button class="v22-btn" data-act="versions">&#128220; Versions</button>' +
+          '<button class="v22-btn" data-act="numbers">&#9990; Import your number</button>' +
+        '</div>' +
+        '<p style="margin:10px 0 0;color:var(--muted,#9a958c);font-size:12.5px">Talk to your agent in the browser or embed it on your site, run scored test calls with AI prompt tips, snapshot and roll back agent changes, or bring a Twilio / Exotel / SIP number you already own.</p></div>';
     body.querySelectorAll('[data-act]').forEach(function (b) {
       b.addEventListener('click', function () {
         var a = b.getAttribute('data-act');
@@ -3960,4 +4050,375 @@ async function detachNumber(numberId) {
     if (build()) { setTimeout(maybeAutoOpen, 1600); return; }
     if (tries++ < 6) setTimeout(boot, 700);
   })();
+})();
+
+/* =======================================================================
+ * MNB Omni Caller - v23..v26 layers (full OmniDim feature parity)
+ *   v23  Voice Widget: test an agent in the browser + embeddable web widget
+ *   v24  Testing: agent simulations + AI prompt enhancement
+ *   v25  Versions: agent version history (save / diff / restore / rename)
+ *   v26  Bring-your-own-number import (Twilio / Exotel / SIP)
+ * All additive, guarded, frontend-only. They call the tenant-scoped
+ * /api routes added in the v7 server layer.
+ * ==================================================================== */
+(function () {
+  if (window.__mnbEnhanced23plus) return; window.__mnbEnhanced23plus = true;
+  var T = function (m, ms) { try { toast(m, ms); } catch (e) {} };
+  var E = function (s) { try { return esc(s); } catch (e) { return String(s == null ? '' : s); } };
+  var jget = function (u) { return fetch(u, { cache: 'no-store' }).then(function (r) { return r.json(); }); };
+  var jsend = function (u, m, b) { return fetch(u, { method: m, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b || {}) }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); }); };
+
+  /* ---- shared styles ---- */
+  var css = document.createElement('style'); css.id = 'mnb-v23-css';
+  css.textContent =
+    '.vx-card{background:var(--panel,#141416);border:1px solid var(--border,#2b2b2f);border-radius:16px;padding:22px;margin-bottom:16px}' +
+    '.vx-card h3{margin:0 0 6px;font-size:16px}.vx-sub{color:var(--muted,#9a958c);font-size:13.5px;margin:0 0 14px}' +
+    '.vx-row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}' +
+    '.vx-f{display:flex;flex-direction:column;gap:5px;margin-bottom:10px}' +
+    '.vx-f label{font-size:12px;color:var(--muted,#9a958c);font-weight:600}' +
+    '.vx-f input,.vx-f select,.vx-f textarea{background:var(--bg,#0e0f12);border:1px solid var(--border,#2b2b2f);color:var(--text,#eee);border-radius:9px;padding:10px 12px;font-size:14px;font-family:inherit;width:100%}' +
+    '.vx-f textarea{min-height:64px;resize:vertical}' +
+    '.vx-f input:focus,.vx-f select:focus,.vx-f textarea:focus{outline:none;border-color:var(--accent,#ff7a18)}' +
+    '.vx-btn{border:none;border-radius:9px;padding:11px 18px;font-weight:700;cursor:pointer;background:var(--accent-grad,linear-gradient(135deg,#ff7a18,#ffab5e));color:#111;font-size:14px}' +
+    '.vx-btn.ghost{background:transparent;border:1px solid var(--border,#2b2b2f);color:var(--text,#eee)}' +
+    '.vx-btn.danger{background:transparent;border:1px solid rgba(229,72,77,.5);color:#ff8a8a}' +
+    '.vx-btn:disabled{opacity:.6;cursor:not-allowed}' +
+    '.vx-btn.live{background:#e5484d;color:#fff}' +
+    '.vx-tabs{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}' +
+    '.vx-tab{padding:8px 14px;border-radius:20px;border:1px solid var(--border,#2b2b2f);background:transparent;color:var(--muted,#9a958c);cursor:pointer;font-size:13px;font-weight:600}' +
+    '.vx-tab.on{background:var(--accent-grad,linear-gradient(135deg,#ff7a18,#ffab5e));color:#111;border-color:transparent}' +
+    '.vx-code{background:var(--bg,#0e0f12);border:1px solid var(--border,#2b2b2f);border-radius:10px;padding:12px 14px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;color:#cfe3ff;word-break:break-all;white-space:pre-wrap}' +
+    '.vx-item{border:1px solid var(--border,#2b2b2f);border-radius:12px;padding:14px 16px;margin-bottom:10px;background:var(--panel-2,#1a1a1d)}' +
+    '.vx-item h4{margin:0 0 4px;font-size:14.5px}.vx-item .meta{color:var(--muted,#9a958c);font-size:12.5px}' +
+    '.vx-pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;background:var(--panel-2,#26262b);color:#cbd5e1;margin-left:6px}' +
+    '.vx-live{display:flex;gap:9px;align-items:center;font-size:13.5px;color:var(--muted,#9a958c);margin-top:10px}' +
+    '.vx-dot{width:9px;height:9px;border-radius:50%;background:#556}.vx-dot.on{background:#43b97f;animation:vxp 1s infinite}@keyframes vxp{0%,100%{opacity:1}50%{opacity:.3}}' +
+    '.vx-tx{max-height:220px;overflow:auto;margin-top:12px;border-top:1px solid var(--border,#2b2b2f);padding-top:10px}' +
+    '.vx-tx p{margin:4px 0;font-size:13.5px}.vx-tx .u{color:var(--accent2,#ffab5e)}.vx-tx .a{color:#cbd5e1}' +
+    '.vx-diff .add{color:#43b97f}.vx-diff .del{color:#ff8a8a}.vx-diff .chg{color:#ffd9b3}' +
+    '.vx-empty{color:var(--muted,#9a958c);font-size:13.5px;padding:8px 0}';
+  document.head.appendChild(css);
+
+  /* ---- shared view/nav helpers ---- */
+  function mkView(id) { var m = document.querySelector('main.main') || (document.getElementById('view-overview') || {}).parentNode; if (!m) return null; if (document.getElementById('view-' + id)) return document.getElementById('view-' + id); var s = document.createElement('section'); s.id = 'view-' + id; s.className = 'view hidden'; m.appendChild(s); return s; }
+  function mkNav(id, ico, label, before) {
+    var nav = document.querySelector('.sidebar nav') || document.querySelector('nav'); if (!nav || document.querySelector('.nav-item[data-view="' + id + '"]')) return;
+    var a = document.createElement('a'); a.href = '#' + id; a.className = 'nav-item'; a.setAttribute('data-view', id);
+    a.innerHTML = '<span class="ico">' + ico + '</span> ' + label;
+    var anchor = document.querySelector('.nav-item[data-view="' + before + '"]');
+    if (anchor && anchor.nextSibling) nav.insertBefore(a, anchor.nextSibling); else nav.appendChild(a);
+    a.addEventListener('click', function (e) { e.preventDefault(); window.switchView(id); });
+  }
+  var loaders = {};
+  function registerView(id, loader) {
+    loaders[id] = loader;
+    var prev = window.switchView;
+    window.switchView = function (view) {
+      if (view === id) {
+        document.querySelectorAll('.view').forEach(function (v) { v.classList.add('hidden'); });
+        var el = document.getElementById('view-' + id); if (el) el.classList.remove('hidden');
+        document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.toggle('active', n.getAttribute('data-view') === id); });
+        if (location.hash.replace('#', '') !== id) location.hash = id;
+        try { loaders[id](); } catch (e) {}
+        return;
+      }
+      return prev.apply(this, arguments);
+    };
+  }
+
+  /* ---- shared: OmniDim web SDK loader ---- */
+  var sdkP = null;
+  function loadSdk() { if (sdkP) return sdkP; sdkP = new Promise(function (res, rej) { if (window.OmnidimensionClient) return res(); var x = document.createElement('script'); x.src = 'https://unpkg.com/@omnidim-ai/client'; x.onload = function () { res(); }; x.onerror = function () { rej(new Error('sdk')); }; document.head.appendChild(x); }); return sdkP; }
+
+  /* ---- shared: my agents ---- */
+  function myAgents() { return jget('/api/agents').then(function (d) { return (d && d.bots) || []; }).catch(function () { return []; }); }
+  function agentOptions(agents, sel) { return agents.map(function (a) { return '<option value="' + E(a.id) + '"' + (String(sel) === String(a.id) ? ' selected' : '') + '>' + E(a.name || ('Agent #' + a.id)) + '</option>'; }).join(''); }
+
+  /* =====================================================================
+   * v23  VOICE WIDGET
+   * =================================================================== */
+  var vWidget = mkView('voicewidget');
+  mkNav('voicewidget', '&#127908;', 'Voice Widget', 'studio');
+  registerView('voicewidget', loadWidget);
+  var wSession = null, wLive = false;
+  async function loadWidget() {
+    var v = document.getElementById('view-voicewidget'); if (!v) return;
+    v.innerHTML = '<header class="view-head"><h2>Voice Widget</h2><p class="muted">Let people talk to your AI agent in the browser - test it yourself, or embed it on your website.</p></header><div id="v23body"><p class="muted">Loading...</p></div>';
+    var me = await jget('/api/me').catch(function () { return {}; });
+    var agents = await myAgents();
+    var body = document.getElementById('v23body');
+    if (!agents.length) { body.innerHTML = '<div class="vx-card"><h3>No agents yet</h3><p class="vx-sub">Create an AI agent first, then you can test it in the browser and embed it on your site.</p><button class="vx-btn" onclick="switchView(\'studio\')">Go to Agent Studio</button></div>'; return; }
+    var widgets = [];
+    try { widgets = (await jget('/api/widgets')).widgets || []; } catch (e) {}
+    body.innerHTML =
+      '<div class="vx-card"><h3>Test in your browser</h3><p class="vx-sub">Start a live voice call with your agent right here. This uses your prepaid minutes.</p>' +
+        '<div class="vx-row"><div class="vx-f" style="min-width:240px;flex:1"><label>Agent</label><select id="v23agent">' + agentOptions(agents) + '</select></div>' +
+        '<button class="vx-btn" id="v23talk">Start call</button></div>' +
+        '<div class="vx-live"><span class="vx-dot" id="v23dot"></span><span id="v23status">Idle</span></div>' +
+        '<div class="vx-tx" id="v23tx" style="display:none"></div>' +
+      '</div>' +
+      '<div class="vx-card"><h3>Embed on your website</h3><p class="vx-sub">Generate a snippet that adds a floating "Talk to us" button to any site. Visitors do not need an account; calls use your prepaid minutes and stop automatically when your balance runs low.</p>' +
+        '<div class="vx-row"><div class="vx-f" style="min-width:240px;flex:1"><label>Agent for the widget</label><select id="v23wagent">' + agentOptions(agents) + '</select></div>' +
+        '<div class="vx-f" style="min-width:160px"><label>Button label</label><input id="v23wlabel" value="Talk to us"></div>' +
+        '<button class="vx-btn" id="v23create">Create widget</button></div>' +
+        '<div id="v23widgets" style="margin-top:14px"></div>' +
+      '</div>';
+    document.getElementById('v23talk').addEventListener('click', toggleTalk);
+    document.getElementById('v23create').addEventListener('click', createWidget);
+    renderWidgets(widgets);
+  }
+  function renderWidgets(widgets) {
+    var el = document.getElementById('v23widgets'); if (!el) return;
+    if (!widgets.length) { el.innerHTML = '<p class="vx-empty">No embed widgets yet. Create one above to get a copy-paste snippet.</p>'; return; }
+    el.innerHTML = widgets.map(function (w) {
+      return '<div class="vx-item"><div class="row-between" style="display:flex;justify-content:space-between;gap:10px;align-items:center">' +
+        '<h4>Agent #' + E(w.agentId) + (w.label ? ' <span class="vx-pill">' + E(w.label) + '</span>' : '') + '</h4>' +
+        '<button class="vx-btn danger" data-del="' + E(w.key) + '" style="padding:6px 12px">Delete</button></div>' +
+        '<p class="meta" style="margin:8px 0 6px">Paste this on your website (just before &lt;/body&gt;):</p>' +
+        '<div class="vx-code" id="code-' + E(w.key) + '">' + E(w.embed) + '</div>' +
+        '<button class="vx-btn ghost" data-copy="' + E(w.key) + '" style="margin-top:8px;padding:7px 14px">Copy snippet</button></div>';
+    }).join('');
+    el.querySelectorAll('[data-copy]').forEach(function (b) { b.addEventListener('click', function () { var t = document.getElementById('code-' + b.getAttribute('data-copy')); try { navigator.clipboard.writeText(t.textContent); T('Snippet copied'); } catch (e) { T('Select and copy the snippet'); } }); });
+    el.querySelectorAll('[data-del]').forEach(function (b) { b.addEventListener('click', async function () { if (!confirm('Delete this widget? The embed will stop working.')) return; await jsend('/api/widgets/' + encodeURIComponent(b.getAttribute('data-del')), 'DELETE'); loadWidget(); }); });
+  }
+  async function createWidget() {
+    var agent = document.getElementById('v23wagent').value;
+    var label = document.getElementById('v23wlabel').value;
+    var b = document.getElementById('v23create'); b.disabled = true; b.textContent = 'Creating...';
+    var r = await jsend('/api/widgets', 'POST', { agent_id: Number(agent), label: label });
+    b.disabled = false; b.textContent = 'Create widget';
+    if (r.ok && r.j.key) { T('Widget created'); loadWidget(); } else T(r.j.error || 'Could not create widget');
+  }
+  function setTalk(state, msg) {
+    var dot = document.getElementById('v23dot'), st = document.getElementById('v23status'), btn = document.getElementById('v23talk');
+    if (dot) dot.classList.toggle('on', state === 'live');
+    if (st) st.textContent = msg || state;
+    if (btn) { btn.classList.toggle('live', state === 'live'); btn.textContent = state === 'live' ? 'End call' : (state === 'connecting' ? 'Connecting...' : 'Start call'); btn.disabled = state === 'connecting'; }
+  }
+  function stopTalk() { try { wSession && wSession.stop(); } catch (e) {} wSession = null; wLive = false; setTalk('idle', 'Idle'); }
+  async function toggleTalk() {
+    if (wLive) { stopTalk(); return; }
+    var agent = document.getElementById('v23agent').value;
+    setTalk('connecting', 'Connecting...');
+    var tx = document.getElementById('v23tx'); if (tx) { tx.style.display = 'block'; tx.innerHTML = ''; }
+    var r = await jsend('/api/sessions', 'POST', { agent_id: Number(agent) });
+    if (!r.ok || !r.j.ws_url) { setTalk('idle', (r.j && r.j.error) || 'Could not start call'); return; }
+    try {
+      await loadSdk();
+      wSession = new window.OmnidimensionClient.WebSession();
+      if (wSession.on) {
+        wSession.on('status', function (x) { if (x && (x.state === 'ended' || x === 'ended')) stopTalk(); });
+        wSession.on('transcript', function (t) { if (!tx || !t) return; var p = document.createElement('p'); p.className = (t.role === 'user' ? 'u' : 'a'); p.textContent = (t.role === 'user' ? 'You: ' : 'Agent: ') + (t.text || ''); tx.appendChild(p); tx.scrollTop = tx.scrollHeight; });
+        wSession.on('error', function () { stopTalk(); });
+      }
+      await wSession.start({ wsUrl: r.j.ws_url });
+      wLive = true; setTalk('live', 'Connected - speak now');
+    } catch (e) { setTalk('idle', 'Could not load the voice engine'); }
+  }
+
+  /* =====================================================================
+   * v24  TESTING (simulations + prompt enhance)
+   * =================================================================== */
+  mkView('testing'); mkNav('testing', '&#129514;', 'Testing', 'voicewidget'); registerView('testing', loadTesting);
+  async function loadTesting() {
+    var v = document.getElementById('view-testing'); if (!v) return;
+    v.innerHTML = '<header class="view-head"><h2>Testing</h2><p class="muted">Run automated test calls against your agent, then let AI suggest prompt improvements.</p></header><div id="v24body"><p class="muted">Loading...</p></div>';
+    var agents = await myAgents();
+    var body = document.getElementById('v24body');
+    if (!agents.length) { body.innerHTML = '<div class="vx-card"><h3>No agents yet</h3><p class="vx-sub">Create an agent first, then you can run test simulations against it.</p><button class="vx-btn" onclick="switchView(\'studio\')">Go to Agent Studio</button></div>'; return; }
+    body.innerHTML =
+      '<div class="vx-card"><h3>New test simulation</h3><p class="vx-sub">Describe a caller scenario. We place real test calls to your agent and score how it does. Uses your prepaid minutes.</p>' +
+      '<div class="vx-row"><div class="vx-f" style="min-width:220px;flex:1"><label>Agent</label><select id="v24agent">' + agentOptions(agents) + '</select></div>' +
+      '<div class="vx-f" style="min-width:200px;flex:1"><label>Test name</label><input id="v24name" value="Quick test"></div></div>' +
+      '<div class="vx-f"><label>Scenario name</label><input id="v24sname" value="Interested customer"></div>' +
+      '<div class="vx-f"><label>Caller behaviour (what the test caller does)</label><textarea id="v24sdesc">Ask about pricing and try to book a follow-up.</textarea></div>' +
+      '<div class="vx-f"><label>Expected result</label><textarea id="v24sexp">Agent explains pricing clearly and offers to schedule a follow-up.</textarea></div>' +
+      '<div class="vx-row"><div class="vx-f" style="max-width:150px"><label>Calls (1-3)</label><input id="v24n" type="number" min="1" max="3" value="1"></div>' +
+      '<div class="vx-f" style="max-width:170px"><label>Max minutes (1-10)</label><input id="v24dur" type="number" min="1" max="10" value="3"></div>' +
+      '<button class="vx-btn" id="v24run">Create &amp; run test</button></div></div>' +
+      '<div class="vx-card"><h3>Your simulations</h3><button class="vx-btn ghost" id="v24refresh" style="padding:7px 14px;margin-bottom:10px">Refresh</button><div id="v24list"><p class="vx-empty">Loading...</p></div></div>';
+    document.getElementById('v24run').addEventListener('click', runSim);
+    document.getElementById('v24refresh').addEventListener('click', listSims);
+    listSims();
+  }
+  async function runSim() {
+    var b = document.getElementById('v24run'); b.disabled = true; b.textContent = 'Starting...';
+    var payload = {
+      name: document.getElementById('v24name').value || 'Quick test',
+      agent_id: Number(document.getElementById('v24agent').value),
+      number_of_call_to_make: Math.min(3, Math.max(1, Number(document.getElementById('v24n').value) || 1)),
+      concurrent_call_count: 1,
+      max_call_duration_in_minutes: Math.min(10, Math.max(1, Number(document.getElementById('v24dur').value) || 3)),
+      scenarios: [{ name: document.getElementById('v24sname').value || 'Scenario', description: document.getElementById('v24sdesc').value || '', expected_result: document.getElementById('v24sexp').value || '' }]
+    };
+    var r = await jsend('/api/simulations', 'POST', payload);
+    if (!r.ok) { b.disabled = false; b.textContent = 'Create & run test'; return T(r.j.error || 'Could not create simulation'); }
+    var sim = r.j.simulation || r.j; var id = sim && sim.id;
+    if (id) { var s = await jsend('/api/simulations/' + id + '/start', 'POST', {}); if (!s.ok) T(s.j.error || 'Created, but could not start'); else T('Test started'); }
+    b.disabled = false; b.textContent = 'Create & run test';
+    listSims();
+  }
+  function simArr(d) { return d.simulations || d.records || d.data || (Array.isArray(d) ? d : []); }
+  async function listSims() {
+    var el = document.getElementById('v24list'); if (!el) return;
+    var d = await jget('/api/simulations').catch(function () { return {}; });
+    var arr = simArr(d);
+    if (!arr.length) { el.innerHTML = '<p class="vx-empty">No simulations yet. Create one above.</p>'; return; }
+    el.innerHTML = arr.map(function (s) {
+      var a = s.analyticsData || {}; var status = s.status || '';
+      var scores = (a.Positive != null) ? ('<span class="vx-pill">+' + E(a.Positive || 0) + '</span><span class="vx-pill">~' + E(a.Neutral || 0) + '</span><span class="vx-pill">-' + E(a.Negative || 0) + '</span>') : '';
+      var done = /finish|complete|done/i.test(status);
+      return '<div class="vx-item"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><h4>' + E(s.name || ('Simulation #' + s.id)) + ' <span class="vx-pill">' + E(status) + '</span></h4><div>' + scores + '</div></div>' +
+        '<div class="meta" style="margin-top:6px">' + (s.total_records != null ? (E(s.total_simulation_finished_records || 0) + '/' + E(s.total_records) + ' calls done') : '') + '</div>' +
+        (s.summary && typeof s.summary === 'string' ? '<p style="font-size:13px;margin:8px 0 0;color:#cbd5e1">' + E(s.summary) + '</p>' : '') +
+        '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' +
+          (done ? '<button class="vx-btn ghost" data-enh="' + E(s.id) + '" style="padding:7px 12px">AI prompt suggestions</button>' : '') +
+          (/run|progress|pending/i.test(status) ? '<button class="vx-btn ghost" data-stop="' + E(s.id) + '" style="padding:7px 12px">Stop</button>' : '') +
+          '<button class="vx-btn danger" data-delsim="' + E(s.id) + '" style="padding:7px 12px">Delete</button>' +
+        '</div><div id="enh-' + E(s.id) + '"></div></div>';
+    }).join('');
+    el.querySelectorAll('[data-enh]').forEach(function (b) { b.addEventListener('click', function () { enhance(b.getAttribute('data-enh')); }); });
+    el.querySelectorAll('[data-stop]').forEach(function (b) { b.addEventListener('click', async function () { await jsend('/api/simulations/' + b.getAttribute('data-stop') + '/stop', 'POST'); T('Stopping...'); listSims(); }); });
+    el.querySelectorAll('[data-delsim]').forEach(function (b) { b.addEventListener('click', async function () { if (!confirm('Delete this simulation?')) return; await jsend('/api/simulations/' + b.getAttribute('data-delsim'), 'DELETE'); listSims(); }); });
+  }
+  async function enhance(id) {
+    var box = document.getElementById('enh-' + id); if (box) box.innerHTML = '<p class="vx-empty">Analyzing the calls and generating suggestions...</p>';
+    var r = await jsend('/api/simulations/' + id + '/enhance-prompt', 'POST');
+    if (!r.ok) { if (box) box.innerHTML = '<p class="vx-empty">' + E(r.j.error || 'Could not generate suggestions (the test may still be running).') + '</p>'; return; }
+    var bd = r.j.prompt_breakdown || []; var prev = r.j.previous_context || [];
+    if (!bd.length) { if (box) box.innerHTML = '<p class="vx-empty">No suggestions returned.</p>'; return; }
+    box.innerHTML = '<div class="vx-card" style="margin-top:10px;background:var(--panel-2,#1a1a1d)"><h4 style="margin:0 0 8px">Suggested prompt improvements</h4>' +
+      bd.map(function (s, i) {
+        var was = (prev[i] && prev[i].prompt) || '';
+        return '<div style="margin-bottom:12px"><div class="meta" style="font-weight:700;color:var(--accent2,#ffab5e)">' + E(s.title || ('Section ' + (i + 1))) + '</div>' +
+          (was ? '<p style="font-size:12.5px;margin:4px 0"><span class="vx-diff"><span class="del">Before:</span></span> ' + E(was) + '</p>' : '') +
+          '<p style="font-size:13px;margin:4px 0"><span class="vx-diff"><span class="add">Suggested:</span></span> ' + E(s.prompt || '') + '</p></div>';
+      }).join('') +
+      '<p class="meta">Apply the wording you like in Agent Studio, then save it as a new version from the Versions tab.</p></div>';
+  }
+
+  /* =====================================================================
+   * v25  VERSIONS (agent version history)
+   * =================================================================== */
+  mkView('versions'); mkNav('versions', '&#128220;', 'Versions', 'testing'); registerView('versions', loadVersions);
+  var curAgent = null;
+  async function loadVersions() {
+    var v = document.getElementById('view-versions'); if (!v) return;
+    v.innerHTML = '<header class="view-head"><h2>Versions</h2><p class="muted">Save snapshots of an agent and roll back any time a change does not work out.</p></header><div id="v25body"><p class="muted">Loading...</p></div>';
+    var agents = await myAgents();
+    var body = document.getElementById('v25body');
+    if (!agents.length) { body.innerHTML = '<div class="vx-card"><h3>No agents yet</h3><p class="vx-sub">Create an agent first to start tracking versions.</p><button class="vx-btn" onclick="switchView(\'studio\')">Go to Agent Studio</button></div>'; return; }
+    if (!curAgent) curAgent = agents[0].id;
+    body.innerHTML =
+      '<div class="vx-card"><div class="vx-row"><div class="vx-f" style="min-width:240px;flex:1"><label>Agent</label><select id="v25agent">' + agentOptions(agents, curAgent) + '</select></div>' +
+      '<button class="vx-btn" id="v25save">Save current as version</button></div></div>' +
+      '<div id="v25list"><p class="vx-empty">Loading versions...</p></div>';
+    document.getElementById('v25agent').addEventListener('change', function () { curAgent = this.value; listVersions(); });
+    document.getElementById('v25save').addEventListener('click', saveVersion);
+    listVersions();
+  }
+  async function listVersions() {
+    var el = document.getElementById('v25list'); if (!el) return;
+    var d = await jget('/api/agents/' + curAgent + '/versions?pageno=1&pagesize=50').catch(function () { return {}; });
+    if (d && d.version_history_enabled === false) { el.innerHTML = '<div class="vx-card"><p class="vx-empty">Version history is not enabled for this agent on the underlying plan.</p></div>'; return; }
+    var arr = (d && d.versions) || [];
+    if (!arr.length) { el.innerHTML = '<div class="vx-card"><p class="vx-empty">No versions saved yet. Click "Save current as version" to snapshot this agent.</p></div>'; return; }
+    el.innerHTML = '<div class="vx-card">' + arr.map(function (ver) {
+      var s = ver.summary || {}; var vn = ver.version_number;
+      var meta = [s.llm_service, s.voice_name, (s.context_sections != null ? s.context_sections + ' sections' : ''), (s.knowledge_files != null ? s.knowledge_files + ' KB files' : '')].filter(Boolean).join(' &#183; ');
+      var date = ver.create_date ? new Date(ver.create_date).toLocaleString('en-IN') : '';
+      return '<div class="vx-item"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center">' +
+        '<h4>v' + E(vn) + ' - ' + E(ver.name || 'Untitled') + ' <span class="vx-pill">' + E(ver.kind || 'manual') + '</span></h4><span class="meta">' + E(date) + '</span></div>' +
+        (ver.note ? '<p class="meta" style="margin:6px 0">' + E(ver.note) + '</p>' : '') +
+        (meta ? '<p class="meta" style="margin:4px 0">' + E(meta) + '</p>' : '') +
+        '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' +
+          '<button class="vx-btn ghost" data-diff="' + E(vn) + '" style="padding:6px 12px">What would change</button>' +
+          '<button class="vx-btn" data-restore="' + E(vn) + '" style="padding:6px 12px">Restore</button>' +
+          '<button class="vx-btn ghost" data-rename="' + E(vn) + '" style="padding:6px 12px">Rename</button>' +
+          (ver.kind !== 'system' ? '<button class="vx-btn danger" data-delver="' + E(vn) + '" style="padding:6px 12px">Delete</button>' : '') +
+        '</div><div id="diff-' + E(vn) + '"></div></div>';
+    }).join('') + '</div>';
+    el.querySelectorAll('[data-diff]').forEach(function (b) { b.addEventListener('click', function () { showDiff(b.getAttribute('data-diff')); }); });
+    el.querySelectorAll('[data-restore]').forEach(function (b) { b.addEventListener('click', function () { restoreVersion(b.getAttribute('data-restore')); }); });
+    el.querySelectorAll('[data-rename]').forEach(function (b) { b.addEventListener('click', function () { renameVersion(b.getAttribute('data-rename')); }); });
+    el.querySelectorAll('[data-delver]').forEach(function (b) { b.addEventListener('click', function () { deleteVersion(b.getAttribute('data-delver')); }); });
+  }
+  async function saveVersion() {
+    var name = prompt('Name this version (e.g. "Working pricing script"):', ''); if (name === null) return;
+    if (!name.trim()) return T('Please enter a name');
+    var note = prompt('Optional note (what changed):', '') || '';
+    var r = await jsend('/api/agents/' + curAgent + '/versions', 'POST', { name: name.trim(), note: note });
+    if (r.ok) { T('Version saved'); listVersions(); } else T(r.j.error || 'Could not save version');
+  }
+  async function showDiff(vn) {
+    var box = document.getElementById('diff-' + vn); if (box) box.innerHTML = '<p class="vx-empty">Comparing with the live agent...</p>';
+    var d = await jget('/api/agents/' + curAgent + '/versions/' + vn + '/diff?against=current').catch(function () { return null; });
+    if (!d) { if (box) box.innerHTML = '<p class="vx-empty">Could not load the comparison.</p>'; return; }
+    var changes = d.changes || d.diff || d.records || [];
+    if (!Array.isArray(changes) || !changes.length) { box.innerHTML = '<p class="vx-empty">No differences - this version matches the live agent.</p>'; return; }
+    box.innerHTML = '<div class="vx-diff" style="margin-top:8px;border-top:1px solid var(--border,#2b2b2f);padding-top:8px">' + changes.map(function (c) {
+      var t = (c.type || c.op || c.change || 'changed'); var label = c.label || c.field || c.item || c.title || '';
+      var cls = /add|new/i.test(t) ? 'add' : /del|remov/i.test(t) ? 'del' : 'chg';
+      return '<p style="font-size:13px;margin:3px 0"><span class="' + cls + '">' + E(t) + '</span> ' + E(label) + '</p>';
+    }).join('') + '</div>';
+  }
+  async function restoreVersion(vn) {
+    if (!confirm('Restore v' + vn + ' onto the live agent? Your current setup is saved first as a backup, so this is undoable.')) return;
+    var r = await jsend('/api/agents/' + curAgent + '/versions/' + vn + '/restore', 'POST');
+    if (r.ok) { var sk = (r.j.skipped || []).length; T('Restored' + (sk ? ' (' + sk + ' item(s) could not be re-linked)' : '')); listVersions(); } else T(r.j.error || 'Could not restore');
+  }
+  async function renameVersion(vn) {
+    var name = prompt('New name for v' + vn + ':', ''); if (name === null || !name.trim()) return;
+    var r = await fetch('/api/agents/' + curAgent + '/versions/' + vn, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) }).then(function (x) { return x.json().then(function (j) { return { ok: x.ok, j: j }; }); });
+    if (r.ok) { T('Renamed'); listVersions(); } else T((r.j && r.j.error) || 'Could not rename');
+  }
+  async function deleteVersion(vn) {
+    if (!confirm('Delete v' + vn + '? This cannot be undone.')) return;
+    var r = await jsend('/api/agents/' + curAgent + '/versions/' + vn, 'DELETE');
+    if (r.ok) { T('Version deleted'); listVersions(); } else T(r.j.error || 'Could not delete');
+  }
+
+  /* =====================================================================
+   * v26  BRING-YOUR-OWN-NUMBER import (injected into the Numbers view)
+   * =================================================================== */
+  var prevSwitch2 = window.switchView;
+  window.switchView = function (view) {
+    var r = prevSwitch2.apply(this, arguments);
+    if (view === 'numbers') setTimeout(injectImport, 450);
+    return r;
+  };
+  function injectImport() {
+    var v = document.getElementById('view-numbers'); if (!v || document.getElementById('v26import')) return;
+    var card = document.createElement('div'); card.className = 'vx-card'; card.id = 'v26import'; card.style.marginTop = '16px';
+    card.innerHTML =
+      '<h3>Import a number you already own</h3><p class="vx-sub">Bring a number from Twilio, Exotel, or any SIP trunk. Your credentials are sent securely to provision the number and are never stored by us.</p>' +
+      '<div class="vx-tabs"><button class="vx-tab on" data-prov="twilio">Twilio</button><button class="vx-tab" data-prov="exotel">Exotel</button><button class="vx-tab" data-prov="sip">SIP trunk</button></div>' +
+      '<div id="v26form"></div>';
+    v.appendChild(card);
+    var forms = {
+      twilio: [['phone_number', 'Phone number (E.164, e.g. +15551234567)', 'text'], ['account_sid', 'Twilio Account SID', 'text'], ['account_token', 'Twilio Auth Token', 'password'], ['name', 'Label (optional)', 'text']],
+      exotel: [['exotel_phone_number', 'Phone number (E.164, e.g. +919876543210)', 'text'], ['exotel_api_key', 'Exotel API Key', 'text'], ['exotel_api_token', 'Exotel API Token', 'password'], ['exotel_subdomain', 'Exotel Subdomain (e.g. your-account.in.exotel.com)', 'text'], ['exotel_account_sid', 'Exotel Account SID', 'text'], ['exotel_app_id', 'Exotel App ID (call flow ID)', 'text'], ['name', 'Label (optional)', 'text']],
+      sip: [['phone_number', 'Phone number (E.164)', 'text'], ['sip_host', 'SIP host (e.g. sip.provider.com)', 'text'], ['sip_trunk_name', 'SIP trunk name (unique)', 'text'], ['sip_port', 'SIP port (default 5060)', 'number'], ['sip_username', 'SIP username (optional)', 'text'], ['sip_password', 'SIP password (optional)', 'password'], ['name', 'Label (optional)', 'text']]
+    };
+    function render(prov) {
+      var f = forms[prov];
+      document.getElementById('v26form').innerHTML = f.map(function (row) {
+        return '<div class="vx-f"><label>' + E(row[1]) + '</label><input id="v26_' + row[0] + '" type="' + row[2] + '"></div>';
+      }).join('') + '<button class="vx-btn" id="v26submit">Import number</button>';
+      document.getElementById('v26submit').addEventListener('click', function () { submit(prov, f); });
+    }
+    async function submit(prov, f) {
+      var payload = {}; f.forEach(function (row) { var el = document.getElementById('v26_' + row[0]); if (el && el.value.trim() !== '') payload[row[0]] = row[2] === 'number' ? Number(el.value) : el.value.trim(); });
+      if (!payload.phone_number && !payload.exotel_phone_number) return T('Phone number is required (E.164 format)');
+      var b = document.getElementById('v26submit'); b.disabled = true; b.textContent = 'Importing...';
+      var r = await jsend('/api/numbers/import/' + prov, 'POST', payload);
+      b.disabled = false; b.textContent = 'Import number';
+      if (r.ok && (r.j.success || r.j.id)) { T(r.j.message || 'Number imported and added to your account'); if (typeof loadNumbers === 'function') { try { loadNumbers(); } catch (e) {} } else location.reload(); }
+      else T(r.j.error || (r.j.message) || 'Could not import the number');
+    }
+    card.querySelectorAll('.vx-tab').forEach(function (t) { t.addEventListener('click', function () { card.querySelectorAll('.vx-tab').forEach(function (x) { x.classList.remove('on'); }); t.classList.add('on'); render(t.getAttribute('data-prov')); }); });
+    render('twilio');
+  }
+  // If the app deep-links to #numbers on load, still inject.
+  setTimeout(function () { if ((location.hash || '').indexOf('numbers') > -1) injectImport(); }, 1400);
 })();
