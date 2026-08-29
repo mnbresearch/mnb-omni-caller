@@ -14,7 +14,7 @@ const REDIS_KEY = 'mnb:omnicaller:db';
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
-let state = { users: [], sessions: {}, kbOwners: {}, settings: {}, userData: {}, orders: {}, resetTokens: {} };
+let state = { users: [], sessions: {}, kbOwners: {}, settings: {}, userData: {}, orders: {}, resetTokens: {}, widgets: {} };
 let redis = null;
 const memRL = new Map(); // in-memory rate-limit fallback when Redis is down
 
@@ -26,6 +26,7 @@ function normalize() {
   state.userData ||= {};
   state.orders ||= {};
   state.resetTokens ||= {};
+  state.widgets ||= {};
 }
 
 /* ---------- persistence backend ---------- */
@@ -112,6 +113,8 @@ function createUser({ email, password, org, role = 'client', status = 'pending',
     numberIds: [],
     minuteCap: 0,
     agentCap: 5,
+    ratePerMin: 0,   // per-account price/min in INR; 0 = use global CLIENT_RATE_INR
+    minReloadInr: 0, // per-account minimum reload in INR; 0 = default (10x rate)
     createdAt: new Date().toISOString(),
   };
   state.users.push(user);
@@ -210,6 +213,32 @@ function getOrder(orderId) { return (state.orders || {})[String(orderId)] || nul
 function listOrders() { return Object.values(state.orders || {}); }
 function listOrdersByUser(userId) { return listOrders().filter((o) => o.userId === userId); }
 
+/* ---------- web voice widgets (public embeddable "talk to agent") ----------
+ * A widget maps a public, unguessable key to one owner + one agent. Visitors on
+ * the owner's own website can start a browser voice call without an MNB login;
+ * the call still draws down the owner's prepaid minutes, checked server-side. */
+function createWidget(userId, agentId, opts = {}) {
+  const key = 'w_' + crypto.randomBytes(18).toString('hex');
+  state.widgets ||= {};
+  const w = {
+    key, userId, agentId: Number(agentId),
+    label: String(opts.label || '').slice(0, 80),
+    disabled: false,
+    createdAt: new Date().toISOString(),
+  };
+  state.widgets[key] = w;
+  save();
+  return w;
+}
+function getWidget(key) { return (state.widgets || {})[String(key)] || null; }
+function listWidgets() { return Object.values(state.widgets || {}); }
+function listWidgetsByUser(userId) { return listWidgets().filter((w) => w.userId === userId); }
+function updateWidget(key, patch) {
+  const w = getWidget(key); if (!w) return null;
+  Object.assign(w, patch || {}); save(); return w;
+}
+function deleteWidget(key) { delete (state.widgets || {})[String(key)]; save(); }
+
 /* ---------- bootstrap admin ---------- */
 function ensureAdmin(email, password) {
   if (!email || !password) return;
@@ -266,5 +295,6 @@ module.exports = {
   getSettings, setSettings, patchSettings,
   getUserData, setUserBucket,
   saveOrder, getOrder, listOrders, listOrdersByUser,
+  createWidget, getWidget, listWidgets, listWidgetsByUser, updateWidget, deleteWidget,
   ensureAdmin, ensureDemo, getDemoUser,
 };

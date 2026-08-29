@@ -296,8 +296,10 @@ app.post('/api/contact', rateLimit(5, 3600), async (req, res) => {
 /* ===================== Cashfree Payments =====================
  * Secure server-side checkout. The secret key lives ONLY in the
  * CASHFREE_SECRET_KEY env var - never in client code or the repo.
- * Prices come from the server-side PLANS catalog, so a client can never
- * choose the amount. Payments are confirmed server-side (order status +
+ * The per-minute rate and minimum reload are set server-side per account,
+ * and minutes credited are computed from the paid amount server-side, so a
+ * client can never choose their own rate. Payments are confirmed server-side
+ * (order status +
  * HMAC-signed webhook) before minutes are credited, and crediting happens
  * exactly once per order. No card data is ever handled by this server. */
 const CF_APP_ID = process.env.CASHFREE_APP_ID || '';
@@ -314,13 +316,19 @@ const CF_READY = !!(CF_APP_ID && CF_SECRET);
 // Client price per minute (INR). Override anytime with the CLIENT_RATE_INR
 // env var - no code change needed. Defaults to Rs 6/min.
 const RATE_INR = Math.max(0.5, Number(process.env.CLIENT_RATE_INR || 6));
-function mkPlan(id, name, minutes, label) {
-  return { id, name, minutes, amount: Math.round(minutes * RATE_INR), currency: 'INR', label };
+// Per-account pricing: admin can set a custom rate/min and minimum reload on
+// each client. Falls back to the global rate. Minimum reload defaults to 10x
+// the rate. Balances warn at 10% remaining and hard-block at 5% remaining.
+function userRate(u) { const r = Number(u && u.ratePerMin) || 0; return r > 0 ? r : RATE_INR; }
+function userMinReload(u) { const m = Number(u && u.minReloadInr) || 0; return m > 0 ? m : Math.max(1, Math.round(userRate(u) * 10)); }
+const WARN_PCT = 10, BLOCK_PCT = 5;
+function reloadState(cap, used) {
+  cap = Number(cap) || 0; used = Number(used) || 0;
+  if (cap <= 0) return { blocked: true, low: true, remaining: 0, pctLeft: 0 };
+  const remaining = Math.max(0, cap - used);
+  const pctLeft = (remaining / cap) * 100;
+  return { blocked: pctLeft <= BLOCK_PCT, low: pctLeft <= WARN_PCT, remaining, pctLeft: Math.round(pctLeft) };
 }
-const PLANS = {
-  starter: mkPlan('starter', 'Starter', 500,  'Starter - 500 prepaid call minutes'),
-  growth:  mkPlan('growth',  'Growth',  1500, 'Growth - 1,500 prepaid call minutes'),
-};
 
 function cfHeaders() {
   return {
@@ -331,16 +339,16 @@ function cfHeaders() {
   };
 }
 
-// Grant the plan's minutes to the buyer exactly once.
+// Credit a paid reload to the buyer's minute balance exactly once.
 function creditOrderOnce(order) {
   if (!order || order.credited) return order;
-  const plan = PLANS[order.planId];
   const user = db.findUserById(order.userId);
-  if (!plan || !user) return order;
-  const addMin = plan.minutes || 0;
+  if (!user) return order;
+  const addMin = Number(order.minutes) || 0;
+  const amt = Number(order.amount) || 0;
+  const cur = order.currency || 'INR';
   db.updateUser(user.id, {
     minuteCap: (Number(user.minuteCap) || 0) + addMin,
-    plan: plan.id,
     lastPaymentAt: new Date().toISOString(),
     status: user.status === 'pending' ? 'active' : user.status,
   });
@@ -351,11 +359,12 @@ function creditOrderOnce(order) {
   try {
     resendSend({
       to: MAIL_ADMIN,
-      subject: `Payment received - ${plan.name}: ${user.contact || user.org || user.email}`,
-      html: accessEmailShell(`<p style="font-size:15px;color:#1a1a1a">A payment was completed on ${APP_NAME}.</p>
-        <p style="font-size:14px;color:#1a1a1a">Plan: <b>${eesc(plan.name)}</b> (${eesc(plan.currency)} ${eesc(String(plan.amount))})<br>
-        Minutes added: <b>${addMin}</b><br>
+      subject: `Payment received - ${cur} ${amt}: ${user.contact || user.org || user.email}`,
+      html: accessEmailShell(`<p style="font-size:15px;color:#1a1a1a">A reload payment was completed on ${APP_NAME}.</p>
+        <p style="font-size:14px;color:#1a1a1a">Amount: <b>${eesc(cur)} ${eesc(String(amt))}</b><br>
+        Minutes added: <b>${addMin}</b> (at ${eesc(cur)} ${eesc(String(order.rate || ''))}/min)<br>
         Customer: ${eesc(user.contact || '')} &lt;${eesc(user.email)}&gt;<br>
+        New balance: <b>${eesc(String(Number(user.minuteCap) || 0))}</b> minutes<br>
         Order: ${eesc(order.orderId)}</p>`),
     });
   } catch (e) {}
@@ -363,11 +372,11 @@ function creditOrderOnce(order) {
     resendSend({
       to: user.email,
       subject: `Payment received - ${addMin} minutes added | MNB Omni Caller`,
-      html: accessEmailShell(`<p style="font-size:16px;color:#1a1a1a">Thank you for your purchase!</p>
+      html: accessEmailShell(`<p style="font-size:16px;color:#1a1a1a">Thank you for your reload!</p>
         <p style="font-size:14px;color:#3a3a3a;line-height:1.65">Your payment was successful and <b>${addMin} calling minutes</b> have been added to your MNB Omni Caller account.</p>
         <table style="width:100%;border-collapse:collapse;border-top:1px solid #f0f0f0;margin-top:8px">
-          <tr><td style="padding:8px 0;color:#888;font-size:13px;width:150px">Plan</td><td style="padding:8px 0;font-size:14px;color:#1a1a1a">${eesc(plan.name)}</td></tr>
-          <tr><td style="padding:8px 0;color:#888;font-size:13px">Amount paid</td><td style="padding:8px 0;font-size:14px;color:#1a1a1a">${eesc(plan.currency)} ${eesc(String(plan.amount))}</td></tr>
+          <tr><td style="padding:8px 0;color:#888;font-size:13px;width:150px">Amount paid</td><td style="padding:8px 0;font-size:14px;color:#1a1a1a">${eesc(cur)} ${eesc(String(amt))}</td></tr>
+          <tr><td style="padding:8px 0;color:#888;font-size:13px">Rate</td><td style="padding:8px 0;font-size:14px;color:#1a1a1a">${eesc(cur)} ${eesc(String(order.rate || ''))} / min</td></tr>
           <tr><td style="padding:8px 0;color:#888;font-size:13px">Minutes added</td><td style="padding:8px 0;font-size:14px;color:#1a1a1a">${addMin}</td></tr>
           <tr><td style="padding:8px 0;color:#888;font-size:13px">Order ID</td><td style="padding:8px 0;font-size:14px;color:#1a1a1a">${eesc(order.orderId)}</td></tr>
         </table>
@@ -377,14 +386,14 @@ function creditOrderOnce(order) {
   return order;
 }
 
-// Public plan catalog (no secrets leave the server).
+// Reload catalog: the caller's per-account rate, minimum reload, and a few
+// suggested top-up amounts (each shown with the minutes it buys).
 app.get('/api/pay/plans', (req, res) => {
-  res.json({
-    ready: CF_READY,
-    mode: CF_ENV,
-    ratePerMin: RATE_INR,
-    plans: Object.values(PLANS).map((p) => ({ id: p.id, name: p.name, amount: p.amount, minutes: p.minutes, currency: p.currency, label: p.label })),
-  });
+  const user = currentUser(req) || {};
+  const rate = userRate(user);
+  const minReload = userMinReload(user);
+  const presets = [minReload, minReload * 3, minReload * 5, minReload * 10].map((a) => ({ amount: a, minutes: Math.floor(a / rate) }));
+  res.json({ ready: CF_READY, mode: CF_ENV, ratePerMin: rate, minReload, currency: 'INR', presets });
 });
 
 // A client's own purchase history (receipts).
@@ -393,7 +402,7 @@ app.get('/api/pay/orders', (req, res) => {
   if (!user) return res.status(401).json({ error: 'Please sign in.' });
   const orders = db.listOrdersByUser(user.id)
     .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
-    .map((o) => ({ orderId: o.orderId, plan: o.planId, amount: o.amount, currency: o.currency, minutes: o.minutes, status: o.status, credited: !!o.credited, createdAt: o.createdAt }));
+    .map((o) => ({ orderId: o.orderId, amount: o.amount, currency: o.currency || 'INR', minutes: o.minutes, rate: o.rate, status: o.status, credited: !!o.credited, createdAt: o.createdAt }));
   res.json({ orders });
 });
 
@@ -403,16 +412,22 @@ app.post('/api/pay/create-order', rateLimit(20, 3600), async (req, res) => {
   if (!user) return res.status(401).json({ error: 'Please sign in to make a purchase.' });
   if (user.demo) return res.status(403).json({ error: 'The demo account cannot make purchases.' });
   if (!CF_READY) return res.status(503).json({ error: 'Payments are not configured yet. Please contact support.' });
-  const plan = PLANS[String((req.body || {}).planId || '')];
-  if (!plan) return res.status(400).json({ error: 'Unknown plan.' });
+  const rate = userRate(user);
+  const minReload = userMinReload(user);
+  const amount = Math.round(Number((req.body || {}).amount || 0));
+  if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: 'Please enter a reload amount.' });
+  if (amount < minReload) return res.status(400).json({ error: `The minimum reload is Rs ${minReload}.` });
+  if (amount > 1000000) return res.status(400).json({ error: 'That amount is too large. Please contact us for large reloads.' });
+  const minutes = Math.floor(amount / rate);
+  if (minutes < 1) return res.status(400).json({ error: 'That amount is too small for any minutes.' });
 
   const phone = String((req.body || {}).phone || user.phone || '').replace(/[^\d]/g, '').slice(-10);
   const orderId = 'mnb_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
   const base = (DEMO_URL || '').replace(/\/$/, '');
   const payload = {
     order_id: orderId,
-    order_amount: plan.amount,
-    order_currency: plan.currency,
+    order_amount: amount,
+    order_currency: 'INR',
     customer_details: {
       customer_id: 'u_' + user.id,
       customer_name: String(user.contact || user.org || 'MNB Customer').slice(0, 100),
@@ -423,7 +438,7 @@ app.post('/api/pay/create-order', rateLimit(20, 3600), async (req, res) => {
       return_url: `${base}/app?order_id={order_id}`,
       notify_url: `${base}/api/pay/webhook`,
     },
-    order_note: plan.label,
+    order_note: `Reload ${minutes} min at Rs ${rate}/min`,
   };
   try {
     const resp = await fetch(`${CF_BASE}/orders`, { method: 'POST', headers: cfHeaders(), body: JSON.stringify(payload) });
@@ -432,7 +447,7 @@ app.post('/api/pay/create-order', rateLimit(20, 3600), async (req, res) => {
       console.error('Cashfree create-order failed:', resp.status, data && data.message);
       return res.status(502).json({ error: (data && data.message) || 'Could not start the payment. Please try again.' });
     }
-    db.saveOrder({ orderId, userId: user.id, planId: plan.id, amount: plan.amount, currency: plan.currency, minutes: plan.minutes, status: 'CREATED', credited: false, createdAt: new Date().toISOString() });
+    db.saveOrder({ orderId, userId: user.id, amount, currency: 'INR', minutes, rate, status: 'CREATED', credited: false, createdAt: new Date().toISOString() });
     res.json({ ok: true, order_id: orderId, payment_session_id: data.payment_session_id, mode: CF_ENV });
   } catch (e) {
     console.error('Cashfree create-order error:', e.message);
@@ -569,12 +584,88 @@ app.get('/api/me', async (req, res) => {
       email: user.email, org: user.org, role: user.role, demo: !!user.demo,
       minuteCap: user.minuteCap, usedMinutes: usage,
       remainingMinutes: (usage != null) ? Math.max(0, (Number(user.minuteCap) || 0) - usage) : null,
+      ratePerMin: userRate(user), minReload: userMinReload(user),
+      lowBalance: (usage != null) ? reloadState(user.minuteCap, usage).low : false,
+      reloadNeeded: (usage != null) ? reloadState(user.minuteCap, usage).blocked : false,
       agentIds: user.agentIds || [], numberIds: user.numberIds || [],
       businessType: user.businessType || 'general',
       agentCap: user.role === 'admin' ? 0 : (user.agentCap || 5),
     },
   });
 });
+
+/* ================= Public web voice widget (no login required) =================
+ * A visitor on the OWNER's own website talks to the owner's AI agent in the
+ * browser. No MNB account is needed by the visitor. The widget key maps to one
+ * owner + one agent; the owner's prepaid minute balance is enforced here, so a
+ * public page can never spend beyond what the owner has paid for. Registered
+ * before the auth guard so it stays public; CORS-open because it is embedded on
+ * third-party sites and returns only a single-use, expiring ws_url. */
+function widgetCors(res) {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+}
+app.options('/api/widget/:key/session', (req, res) => { widgetCors(res); res.status(204).end(); });
+app.post('/api/widget/:key/session', rateLimit(20, 600), async (req, res) => {
+  widgetCors(res);
+  try {
+    const w = db.getWidget(req.params.key);
+    if (!w || w.disabled) return res.status(404).json({ error: 'This voice widget is not available.' });
+    const owner = db.findUserById(w.userId);
+    if (!owner || owner.status !== 'active') return res.status(403).json({ error: 'This voice widget is currently unavailable.' });
+    const cap = Number(owner.minuteCap) || 0;
+    const used = await getUsageMinutes(owner).catch(() => 0);
+    if (reloadState(cap, used).blocked) return res.status(402).json({ error: 'This voice assistant is temporarily offline. Please try again later.' });
+    const body = { agent_id: Number(w.agentId), type: 'voice' };
+    if (req.body && req.body.custom_variables && typeof req.body.custom_variables === 'object') body.custom_variables = req.body.custom_variables;
+    const { status, data } = await omni('POST', '/sessions/create', { body });
+    if (status < 200 || status >= 300 || !data || !data.ws_url) return res.status(502).json({ error: 'Could not start the voice session.' });
+    invalidateUsage(owner.id);
+    res.json({ ws_url: data.ws_url, expires_at: data.expires_at || null });
+  } catch (e) { res.status(502).json({ error: 'Could not start the voice session.' }); }
+});
+
+/* Hosted embed loader. The client pastes one <script> tag on their site; this
+ * file injects a floating "Talk to us" button that opens a live voice call with
+ * their agent. Served publicly with CORS so it loads on any domain. */
+app.get('/omni-widget.js', (req, res) => {
+  res.set('Content-Type', 'application/javascript; charset=utf-8');
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Cache-Control', 'public, max-age=300');
+  res.end(WIDGET_LOADER_JS);
+});
+const WIDGET_LOADER_JS = [
+  '(function(){',
+  '  var s=document.currentScript;',
+  '  if(!s){var ss=document.getElementsByTagName("script");s=ss[ss.length-1];}',
+  '  var key=s.getAttribute("data-mnb-widget");if(!key)return;',
+  '  var base=s.src.replace(/\\/omni-widget\\.js.*/,"");',
+  '  var label=s.getAttribute("data-label")||"Talk to us";',
+  '  var color=s.getAttribute("data-color")||"#ff7a18";',
+  '  var css="#mnbw-btn{position:fixed;bottom:22px;right:22px;z-index:2147483000;border:none;border-radius:40px;padding:14px 20px;font:600 15px system-ui,sans-serif;color:#111;background:"+color+";box-shadow:0 10px 30px rgba(0,0,0,.25);cursor:pointer;display:flex;gap:9px;align-items:center}"',
+  '   +"#mnbw-btn.live{background:#e5484d;color:#fff}#mnbw-dot{width:9px;height:9px;border-radius:50%;background:#111}#mnbw-btn.live #mnbw-dot{background:#fff;animation:mnbwp 1s infinite}@keyframes mnbwp{0%,100%{opacity:1}50%{opacity:.3}}";',
+  '  var st=document.createElement("style");st.textContent=css;document.head.appendChild(st);',
+  '  var btn=document.createElement("button");btn.id="mnbw-btn";btn.innerHTML=\'<span id="mnbw-dot"></span><span id="mnbw-lbl"></span>\';',
+  '  document.body.appendChild(btn);btn.querySelector("#mnbw-lbl").textContent=label;',
+  '  var session=null,sdkReady=null;',
+  '  function loadSdk(){if(sdkReady)return sdkReady;sdkReady=new Promise(function(res,rej){if(window.OmnidimensionClient)return res();var x=document.createElement("script");x.src="https://unpkg.com/@omnidim-ai/client";x.onload=function(){res();};x.onerror=function(){rej();};document.head.appendChild(x);});return sdkReady;}',
+  '  function setLive(v){btn.classList.toggle("live",v);btn.querySelector("#mnbw-lbl").textContent=v?"End call":label;}',
+  '  function stop(){try{session&&session.stop();}catch(e){}session=null;setLive(false);}',
+  '  btn.addEventListener("click",function(){',
+  '    if(session){stop();return;}',
+  '    btn.querySelector("#mnbw-lbl").textContent="Connecting...";',
+  '    fetch(base+"/api/widget/"+key+"/session",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"})',
+  '      .then(function(r){return r.json();}).then(function(j){',
+  '        if(!j||!j.ws_url){btn.querySelector("#mnbw-lbl").textContent=(j&&j.error)||"Unavailable";setTimeout(function(){setLive(false);},2500);return;}',
+  '        return loadSdk().then(function(){session=new window.OmnidimensionClient.WebSession();',
+  '          session.on&&session.on("status",function(x){if(x&&(x.state==="ended"||x==="ended"))stop();});',
+  '          session.on&&session.on("error",function(){stop();});',
+  '          return session.start({wsUrl:j.ws_url}).then(function(){setLive(true);});});',
+  '      }).catch(function(){btn.querySelector("#mnbw-lbl").textContent="Unavailable";setTimeout(function(){setLive(false);},2500);});',
+  '  });',
+  '})();'
+].join('\n');
 
 app.use('/api', (req, res, next) => {
   if (req.path.startsWith('/auth/') || req.path === '/me') return next();
@@ -753,8 +844,9 @@ async function requireMinutes(req, res, next) {
     if (isAdmin(req)) return next();
     const cap = Number(req.user.minuteCap) || 0;
     const used = await getUsageMinutes(req.user).catch(() => 0);
-    if (used >= cap) {
-      return res.status(403).json({ error: cap <= 0 ? 'You have no calling minutes yet. Please buy a minute pack from the Billing tab to start calling.' : `Your minute balance is used up (${used}/${cap} minutes). Please buy more minutes from the Billing tab to keep calling.` });
+    const st = reloadState(cap, used);
+    if (st.blocked) {
+      return res.status(403).json({ reloadRequired: true, error: cap <= 0 ? 'You have no calling minutes yet. Please reload from the Billing tab to start calling.' : `Reload required: only ${st.remaining} of ${cap} minutes left (below ${BLOCK_PCT}%). Please reload from the Billing tab to keep calling.` });
     }
     checkOmniBudget(); // fire-and-forget low-balance watch on the OmniDim account
     next();
@@ -806,13 +898,15 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
   res.json({ users });
 });
 app.post('/api/admin/users/:id/update', adminOnly, (req, res) => {
-  const { status, agentIds, numberIds, minuteCap, agentCap } = req.body || {};
+  const { status, agentIds, numberIds, minuteCap, agentCap, ratePerMin, minReloadInr } = req.body || {};
   const patch = {};
   if (status) patch.status = status;
   if (Array.isArray(agentIds)) patch.agentIds = agentIds.map(Number);
   if (Array.isArray(numberIds)) patch.numberIds = numberIds.map(Number);
   if (minuteCap !== undefined) patch.minuteCap = Number(minuteCap) || 0;
   if (agentCap !== undefined) patch.agentCap = Number(agentCap) || 0;
+  if (ratePerMin !== undefined) patch.ratePerMin = Math.max(0, Number(ratePerMin) || 0);
+  if (minReloadInr !== undefined) patch.minReloadInr = Math.max(0, Number(minReloadInr) || 0);
   const u = db.updateUser(req.params.id, patch);
   if (!u) return res.status(404).json({ error: 'User not found' });
   usageCache.delete(u.id);
@@ -920,8 +1014,9 @@ app.post('/api/calls/dispatch', async (req, res) => {
   if (!isAdmin(req)) {
     const cap = Number(req.user.minuteCap) || 0;
     const used = await getUsageMinutes(req.user).catch(() => 0);
-    if (used >= cap) {
-      return res.status(403).json({ error: cap <= 0 ? 'You have no calling minutes yet. Please buy a minute pack from the Billing tab to start calling.' : `Your minute balance is used up (${used}/${cap} minutes). Please buy more minutes from the Billing tab to keep calling.` });
+    const st = reloadState(cap, used);
+    if (st.blocked) {
+      return res.status(403).json({ reloadRequired: true, error: cap <= 0 ? 'You have no calling minutes yet. Please reload from the Billing tab to start calling.' : `Reload required: only ${st.remaining} of ${cap} minutes left (below ${BLOCK_PCT}%). Please reload from the Billing tab to keep calling.` });
     }
     checkOmniBudget();
   }
@@ -1133,8 +1228,183 @@ app.post('/api/numbers/request', rateLimit(5, 3600), (req, res) => {
 });
 app.post('/api/numbers/attach', adminOnly, relay('POST', '/phone_number/attach'));
 app.post('/api/numbers/detach', adminOnly, relay('POST', '/phone_number/detach'));
+// Admin number-shop tools: search, buy (spends YOUR OmniDim wallet) and release.
+// Admin-only so number cost stays controlled by MNB. Use these to fulfil a
+// client's number request, then delegate the number from the Admin panel.
+app.get('/api/admin/numbers/search', adminOnly, relay('GET', '/phone_number/search', { passQuery: true }));
+app.post('/api/admin/numbers/purchase', adminOnly, relay('POST', '/phone_number/purchase'));
+app.post('/api/admin/numbers/release', adminOnly, relay('POST', '/phone_number/release'));
 app.get('/api/voices', relay('GET', '/providers/voices', { passQuery: true }));
+app.get('/api/voices/:id', relay('GET', (r) => `/providers/voices/${r.params.id}`));
 app.get('/api/llms', relay('GET', '/providers/llms'));
+// Fuller provider catalog for agent customization (speech-to-text, text-to-speech, all).
+app.get('/api/providers/stt', relay('GET', '/providers/stt'));
+app.get('/api/providers/tts', relay('GET', '/providers/tts'));
+app.get('/api/providers/all', relay('GET', '/providers/all'));
+
+/* ========================================================================
+ * v7 PLATFORM LAYER - full OmniDim feature parity
+ * (1) Web voice sessions + embeddable widgets, (2) agent testing via
+ * simulations + AI prompt enhancement, (3) bring-your-own-number import
+ * (Twilio / Exotel / SIP), and (4) agent version history. Everything is
+ * proxied through the pooled OmniDim account with per-tenant ownership
+ * checks, so clients never see or hold an OmniDim key. Minute-consuming
+ * actions are gated by the same prepaid reload balance as phone calls.
+ * ==================================================================== */
+
+// A simulation belongs to a tenant iff its agent (bot_id) is one they own.
+async function simOwned(req, simId) {
+  if (isAdmin(req)) return true;
+  try {
+    const { status, data } = await omni('GET', `/simulations/${simId}`);
+    if (status !== 200) return false;
+    const sim = (data && (data.simulation || data)) || {};
+    const bid = sim.bot_id;
+    const botId = Number(bid && typeof bid === 'object' ? bid.id : bid);
+    return (req.user.agentIds || []).map(Number).includes(botId);
+  } catch (e) { return false; }
+}
+
+/* ---- (1a) Web voice sessions: test one of YOUR OWN agents in the browser ---- */
+app.post('/api/sessions', requireMinutes, async (req, res) => {
+  const agentId = Number((req.body || {}).agent_id);
+  if (!agentId) return res.status(400).json({ error: 'agent_id is required' });
+  if (!ownsAgent(req, agentId)) return res.status(403).json({ error: 'This agent is not assigned to your organization' });
+  try {
+    const body = { agent_id: agentId, type: 'voice' };
+    if (req.body.custom_variables && typeof req.body.custom_variables === 'object') body.custom_variables = req.body.custom_variables;
+    if (req.body.metadata && typeof req.body.metadata === 'object') body.metadata = req.body.metadata;
+    const { status, data } = await omni('POST', '/sessions/create', { body });
+    if (status >= 200 && status < 300) invalidateUsage(req.user.id);
+    res.status(status).json(data);
+  } catch (e) { res.status(502).json({ error: 'Could not start web session', detail: String(e.message || e) }); }
+});
+
+/* ---- (1b) Embeddable widgets: put "talk to your agent" on your own site ---- */
+app.get('/api/widgets', (req, res) => {
+  const base = (process.env.APP_PUBLIC_URL || 'https://omni.mnbresearch.com').replace(/\/+$/, '');
+  const rows = db.listWidgetsByUser(req.user.id).map((w) => ({
+    key: w.key, agentId: w.agentId, label: w.label || '', disabled: !!w.disabled, createdAt: w.createdAt,
+    embed: `<script src="${base}/omni-widget.js" data-mnb-widget="${w.key}" data-label="Talk to us" async></script>`,
+  }));
+  res.json({ widgets: rows, base });
+});
+app.post('/api/widgets', (req, res) => {
+  if (req.user.demo) return res.status(403).json({ error: DEMO_WRITE_MSG });
+  const agentId = Number((req.body || {}).agent_id);
+  if (!agentId) return res.status(400).json({ error: 'agent_id is required' });
+  if (!ownsAgent(req, agentId)) return res.status(403).json({ error: 'This agent is not assigned to your organization' });
+  const w = db.createWidget(req.user.id, agentId, { label: String((req.body || {}).label || '') });
+  res.json({ ok: true, key: w.key });
+});
+app.delete('/api/widgets/:key', (req, res) => {
+  const w = db.getWidget(req.params.key);
+  if (!w || (w.userId !== req.user.id && !isAdmin(req))) return res.status(404).json({ error: 'Widget not found' });
+  db.deleteWidget(req.params.key);
+  res.json({ ok: true });
+});
+
+/* ---- (2) Agent testing: simulations + AI prompt enhancement ---- */
+app.get('/api/simulations', async (req, res) => {
+  try {
+    const { status, data } = await omni('GET', '/simulations', { query: req.query });
+    if (status !== 200) return res.status(status).json(data);
+    if (isAdmin(req)) return res.json(data);
+    const ids = (req.user.agentIds || []).map(Number);
+    const own = (arr) => (Array.isArray(arr) ? arr.filter((s) => {
+      const bid = s && s.bot_id; const botId = Number(bid && typeof bid === 'object' ? bid.id : bid);
+      return ids.includes(botId);
+    }) : arr);
+    const out = Object.assign({}, data);
+    if (Array.isArray(data.simulations)) out.simulations = own(data.simulations);
+    else if (Array.isArray(data.records)) out.records = own(data.records);
+    else if (Array.isArray(data.data)) out.data = own(data.data);
+    res.json(out);
+  } catch (e) { res.status(502).json({ error: 'Upstream request failed' }); }
+});
+app.post('/api/simulations', async (req, res) => {
+  const agentId = Number((req.body || {}).agent_id);
+  if (!agentId) return res.status(400).json({ error: 'agent_id is required' });
+  if (!ownsAgent(req, agentId)) return res.status(403).json({ error: 'This agent is not assigned to your organization' });
+  const { status, data } = await omni('POST', '/simulations', { body: req.body });
+  res.status(status).json(data);
+});
+app.get('/api/simulations/:id', async (req, res, next) => {
+  if (!(await simOwned(req, req.params.id))) return res.status(403).json({ error: 'This simulation is not part of your account' });
+  next();
+}, relay('GET', (r) => `/simulations/${r.params.id}`));
+app.put('/api/simulations/:id', async (req, res, next) => {
+  if (!(await simOwned(req, req.params.id))) return res.status(403).json({ error: 'This simulation is not part of your account' });
+  next();
+}, relay('PUT', (r) => `/simulations/${r.params.id}`));
+app.delete('/api/simulations/:id', async (req, res, next) => {
+  if (!(await simOwned(req, req.params.id))) return res.status(403).json({ error: 'This simulation is not part of your account' });
+  next();
+}, relay('DELETE', (r) => `/simulations/${r.params.id}`));
+app.post('/api/simulations/:id/start', requireMinutes, async (req, res) => {
+  if (!(await simOwned(req, req.params.id))) return res.status(403).json({ error: 'This simulation is not part of your account' });
+  try {
+    const { status, data } = await omni('POST', `/simulations/${req.params.id}/start`, { body: req.body || {} });
+    if (status >= 200 && status < 300) invalidateUsage(req.user.id);
+    res.status(status).json(data);
+  } catch (e) { res.status(502).json({ error: 'Could not start simulation' }); }
+});
+app.post('/api/simulations/:id/stop', async (req, res, next) => {
+  if (!(await simOwned(req, req.params.id))) return res.status(403).json({ error: 'This simulation is not part of your account' });
+  next();
+}, relay('POST', (r) => `/simulations/${r.params.id}/stop`));
+app.post('/api/simulations/:id/enhance-prompt', async (req, res, next) => {
+  if (!(await simOwned(req, req.params.id))) return res.status(403).json({ error: 'This simulation is not part of your account' });
+  next();
+}, relay('POST', (r) => `/simulations/${r.params.id}/enhance-prompt`));
+
+/* ---- (3) Bring-your-own-number import (Twilio / Exotel / SIP) ----
+ * The client enters their OWN carrier credentials, which we forward to OmniDim
+ * over HTTPS and never store. On success the number is auto-scoped to the
+ * importing client so only they (and admins) can use it. */
+function pickFields(src, keys) {
+  const out = {}; for (const k of keys) if (src && src[k] !== undefined && src[k] !== '') out[k] = src[k]; return out;
+}
+async function doImport(req, res, upstreamPath, fields) {
+  if (req.user.demo) return res.status(403).json({ error: DEMO_WRITE_MSG });
+  const body = pickFields(req.body || {}, fields);
+  if (!body.phone_number && !body.exotel_phone_number) return res.status(400).json({ error: 'A phone number in E.164 format (e.g. +15551234567) is required.' });
+  try {
+    const { status, data } = await omni('POST', upstreamPath, { body });
+    if (status >= 200 && status < 300) {
+      const newId = data && (data.id || data.phone_number_id || data.number_id);
+      if (newId && !isAdmin(req)) {
+        const ids = Array.from(new Set([...(req.user.numberIds || []), Number(newId)]));
+        db.updateUser(req.user.id, { numberIds: ids });
+        req.user.numberIds = ids;
+      }
+    }
+    res.status(status).json(data);
+  } catch (e) { res.status(502).json({ error: 'Could not import the number. Please check your credentials and try again.' }); }
+}
+app.post('/api/numbers/import/twilio', (req, res) =>
+  doImport(req, res, '/phone_number/import/twilio', ['phone_number', 'account_sid', 'account_token', 'name']));
+app.post('/api/numbers/import/exotel', (req, res) =>
+  doImport(req, res, '/phone_number/import/exotel', ['exotel_phone_number', 'exotel_api_key', 'exotel_api_token', 'exotel_subdomain', 'exotel_account_sid', 'exotel_app_id', 'name']));
+app.post('/api/numbers/import/sip', (req, res) =>
+  doImport(req, res, '/phone_number/import/sip', ['phone_number', 'sip_host', 'sip_trunk_name', 'name', 'sip_port', 'sip_username', 'sip_password', 'sip_dial_prefix', 'sip_strip_plus']));
+
+/* ---- (4) Agent version history (save / list / diff / restore / rename / delete) ---- */
+function guardAgent(req, res, next) {
+  if (!ownsAgent(req, req.params.id)) return res.status(403).json({ error: 'This agent is not assigned to your organization' });
+  next();
+}
+app.get('/api/agents/:id/versions', guardAgent, relay('GET', (r) => `/agents/${r.params.id}/versions`, { passQuery: true }));
+app.post('/api/agents/:id/versions', guardAgent, async (req, res) => {
+  const b = pickFields(req.body || {}, ['name', 'note']);
+  if (!b.name) return res.status(400).json({ error: 'A version name is required.' });
+  const { status, data } = await omni('POST', `/agents/${req.params.id}/versions`, { body: b });
+  res.status(status).json(data);
+});
+app.get('/api/agents/:id/versions/:vid/diff', guardAgent, relay('GET', (r) => `/agents/${r.params.id}/versions/${r.params.vid}/diff`, { passQuery: true }));
+app.post('/api/agents/:id/versions/:vid/restore', guardAgent, relay('POST', (r) => `/agents/${r.params.id}/versions/${r.params.vid}/restore`));
+app.patch('/api/agents/:id/versions/:vid', guardAgent, relay('PATCH', (r) => `/agents/${r.params.id}/versions/${r.params.vid}`));
+app.delete('/api/agents/:id/versions/:vid', guardAgent, relay('DELETE', (r) => `/agents/${r.params.id}/versions/${r.params.vid}`));
 
 /* ========================================================================
  * v6 PLATFORM LAYER
