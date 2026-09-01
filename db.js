@@ -247,9 +247,16 @@ function ensureAdmin(email, password) {
   if (!admin) {
     admin = createUser({ email, password, org: 'MNB Research', role: 'admin', status: 'active' });
     console.log(`Admin account created: ${email}`);
-  } else if (admin.role !== 'admin' || admin.status !== 'active') {
-    updateUser(admin.id, { role: 'admin', status: 'active' });
+    return;
   }
+  const patch = {};
+  if (admin.role !== 'admin') patch.role = 'admin';
+  if (admin.status !== 'active') patch.status = 'active';
+  // Keep the admin password in sync with ADMIN_PASSWORD so the owner can always
+  // recover access: set a new value in the host env, redeploy, and log in. (The
+  // env var is the source of truth for the admin login.)
+  if (!verifyPassword(password, admin.passHash)) patch.passHash = hashPassword(password);
+  if (Object.keys(patch).length) { updateUser(admin.id, patch); console.log(`Admin account synced from env: ${email}`); }
 }
 
 /* ---------- bootstrap read-only demo account ---------- */
