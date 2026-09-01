@@ -3636,7 +3636,7 @@ async function detachNumber(numberId) {
     var sym = pd.symbol || (cur === 'USD' ? '$' : '&#8377;');
     var isUsd = cur === 'USD';
     function fmt(n) { try { return Number(n).toLocaleString(isUsd ? 'en-US' : 'en-IN', isUsd ? { minimumFractionDigits: 0, maximumFractionDigits: 2 } : {}); } catch (e) { return String(n); } }
-    var rate = Number(pd.ratePerMin || user.ratePerMin || (isUsd ? 0.6 : 6));
+    var rate = Number(pd.ratePerMin || user.ratePerMin || (isUsd ? 0.6 : 12));
     var minReload = Number(pd.minReload || user.minReload || Math.max(1, isUsd ? Math.round(rate * 10 * 100) / 100 : Math.round(rate * 10)));
     curRate = rate; curMin = minReload;
 
@@ -3982,7 +3982,7 @@ async function detachNumber(numberId) {
     vGS.innerHTML = '<header class="view-head"><h2>Get started</h2><p class="muted">Four quick steps to your first live AI call.</p></header><div id="v22body"><p class="muted">Checking your setup...</p></div>';
     var s = await stats();
     var steps = [
-      { done: s.cap > 0, t: 'Top up calling minutes', d: 'Pay as you go at &#8377;6/min - top up any amount from &#8377;60. Minutes are used as you call and never expire monthly.', b: 'Top up', a: 'billing' },
+      { done: s.cap > 0, t: 'Top up calling minutes', d: 'Pay as you go at &#8377;12/min - top up any amount from &#8377;600. Minutes are used as you call and never expire monthly.', b: 'Top up', a: 'billing' },
       { done: s.agents > 0, t: 'Build your AI agent', d: 'Give it a purpose, a voice and your knowledge base. It learns how to greet, qualify and close - no coding. <button class="v22-btn ghost" data-act="reqagent" style="margin-top:9px;padding:6px 12px;font-size:12px">Or have MNB build it for you</button>', b: 'Create agent', a: 'studio' },
       { done: s.numbers > 0, t: 'Get your calling number', d: 'Request a dedicated caller-ID number. We provision and attach it to your agent, usually within one business day.', b: 'Request number', a: 'reqnum' },
       { done: s.calls > 0, t: 'Place your first call', d: 'Enter a number and dispatch. Your agent talks, listens and adapts in real time, then returns a transcript, summary and recording.', b: 'Make a call', a: 'call' }
