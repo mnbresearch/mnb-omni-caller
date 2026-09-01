@@ -319,11 +319,16 @@ const CF_READY = !!(CF_APP_ID && CF_SECRET);
 // OmniDim's rate plus a fixed markup, so every minute sold is above cost.
 // Client price per minute (INR). Override anytime with the CLIENT_RATE_INR
 // env var - no code change needed. Defaults to Rs 6/min.
-const RATE_INR = Math.max(0.5, Number(process.env.CLIENT_RATE_INR || 6));
+const RATE_INR = Math.max(0.5, Number(process.env.CLIENT_RATE_INR || 12));
 // Foreign (USD) default per-minute price. Override with CLIENT_RATE_USD.
 // Defaults to $0.60/min so overseas clients can be billed in dollars while
 // Indian clients stay in rupees - a currency the admin sets per account.
 const RATE_USD = Math.max(0.05, Number(process.env.CLIENT_RATE_USD || 0.6));
+// Minimum top-up (floor) so nobody buys a tiny pack. Override via env.
+// India: Rs 600 (=100 min at Rs 6). Foreign: $10. The effective minimum is the
+// larger of this floor and 10x the account's per-minute rate.
+const MIN_RELOAD_INR = Math.max(1, Number(process.env.MIN_RELOAD_INR || 600));
+const MIN_RELOAD_USD = Math.max(1, Number(process.env.MIN_RELOAD_USD || 10));
 // Per-account pricing: admin sets each client's CURRENCY (INR or USD), a custom
 // rate/min, and a minimum reload. Rate falls back to the global rate for that
 // currency. Minimum reload defaults to 10x the rate. Balances warn at 10%
@@ -332,7 +337,7 @@ function userCurrency(u) { return (u && String(u.currency).toUpperCase() === 'US
 function curSymbol(cur) { return cur === 'USD' ? '$' : 'Rs '; }
 function roundAmt(cur, n) { const x = Number(n) || 0; return cur === 'USD' ? Math.round(x * 100) / 100 : Math.round(x); }
 function userRate(u) { const r = Number(u && u.ratePerMin) || 0; if (r > 0) return r; return userCurrency(u) === 'USD' ? RATE_USD : RATE_INR; }
-function userMinReload(u) { const m = Number(u && u.minReloadInr) || 0; if (m > 0) return m; const cur = userCurrency(u); return roundAmt(cur, Math.max(cur === 'USD' ? 1 : 1, userRate(u) * 10)); }
+function userMinReload(u) { const m = Number(u && u.minReloadInr) || 0; if (m > 0) return m; const cur = userCurrency(u); const floor = cur === 'USD' ? MIN_RELOAD_USD : MIN_RELOAD_INR; return roundAmt(cur, Math.max(floor, userRate(u) * 10)); }
 const WARN_PCT = 10, BLOCK_PCT = 5;
 function reloadState(cap, used) {
   cap = Number(cap) || 0; used = Number(used) || 0;
