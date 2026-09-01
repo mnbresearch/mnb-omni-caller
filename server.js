@@ -44,7 +44,9 @@ function ensureReady() {
   if (!__readyPromise) {
     __readyPromise = (async () => {
       await db.init();
-      db.ensureAdmin(process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD);
+      // Admin password: prefer ADMIN_PASSWORD, but fall back to the legacy
+      // DASHBOARD_PASSWORD env var so existing deployments keep working.
+      db.ensureAdmin(process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD || process.env.DASHBOARD_PASSWORD);
       db.ensureDemo(demo.AGENT_ID);
     })();
   }
