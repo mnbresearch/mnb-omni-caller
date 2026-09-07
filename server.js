@@ -21,6 +21,8 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.removeHeader('X-Powered-By');
   next();
 });
 
@@ -730,11 +732,17 @@ const isAdmin = (req) => req.user.role === 'admin';
 const ownsAgent = (req, agentId) => isAdmin(req) || req.user.agentIds.includes(Number(agentId));
 
 /* ================= OmniDim proxy helpers ================= */
+// The OmniDim key + base can be changed at runtime by a super-admin from the
+// dashboard (stored server-side in settings) and otherwise fall back to env.
+// This lets you rotate the OmniDim API key without a redeploy.
+function omniKey() { try { return pref('omnidim', 'apiKey', 'OMNIDIM_API_KEY') || ''; } catch (e) { return process.env.OMNIDIM_API_KEY || ''; } }
+function omniBase() { try { return pref('omnidim', 'apiBase', 'OMNIDIM_API_BASE') || BASE; } catch (e) { return BASE; } }
+
 async function omni(method, upstreamPath, { query, body } = {}) {
   const qs = query ? '?' + new URLSearchParams(query).toString() : '';
-  const resp = await fetch(BASE + upstreamPath + qs, {
+  const resp = await fetch(omniBase() + upstreamPath + qs, {
     method,
-    headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${omniKey()}`, 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await resp.text();
@@ -863,6 +871,9 @@ async function getUsageMinutes(user) {
   return minutes;
 }
 function invalidateUsage(userId) { try { usageCache.delete(userId); _callIndexCache.delete(userId); } catch (e) {} }
+// Clear ALL cached usage/agent/call data - used after the OmniDim key changes,
+// since a new key may point at a different OmniDim account.
+function invalidateAllUsage() { try { usageCache.clear(); _callIndexCache.clear(); _agentsCache.clear(); aggUsageCache = { at: 0, minutes: 0 }; } catch (e) {} }
 
 // Express guard: block calls when a client's prepaid minute balance is used up.
 async function requireMinutes(req, res, next) {
@@ -1211,8 +1222,8 @@ app.get('/api/recording/:id', async (req, res) => {
       return res.status(403).json({ error: 'This recording is not part of your account' });
     }
     const qs = new URLSearchParams(req.query).toString();
-    const upstream = await fetch(`${BASE}/recording/${req.params.id}${qs ? '?' + qs : ''}`, {
-      headers: { Authorization: `Bearer ${KEY}` },
+    const upstream = await fetch(`${omniBase()}/recording/${req.params.id}${qs ? '?' + qs : ''}`, {
+      headers: { Authorization: `Bearer ${omniKey()}` },
     });
     if (!upstream.ok) return res.status(upstream.status).end();
     res.setHeader('Content-Type', upstream.headers.get('content-type') || 'audio/mpeg');
@@ -1936,6 +1947,51 @@ app.post('/api/admin/integrations', adminOnly, (req, res) => {
   }
   saveIntegSection(section, clean);
   res.json({ ok: true, config: maskedConfig(), aiProvider: aiProvider() });
+});
+
+/* ===== Super-admin: OmniDim master API key (rotate without redeploy) =====
+ * The OmniDim key powers every client's calls. Only an admin can view its
+ * status (masked) or replace it. A new key is validated against OmniDim BEFORE
+ * it is saved, so a typo can never take the whole platform offline. */
+async function testOmniKey(key, base) {
+  if (!key) return { ok: false, status: 0, error: 'no key' };
+  try {
+    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 10000);
+    const r = await fetch((base || BASE) + '/agents?pageno=1&pagesize=1', { headers: { Authorization: 'Bearer ' + key }, signal: ctrl.signal });
+    clearTimeout(t);
+    return { ok: r.status >= 200 && r.status < 300, status: r.status };
+  } catch (e) { return { ok: false, status: 0, error: String(e.message || e) }; }
+}
+app.get('/api/admin/omnidim', adminOnly, async (req, res) => {
+  const key = omniKey(); const base = omniBase();
+  const source = (cfg('omnidim').apiKey) ? 'dashboard' : (process.env.OMNIDIM_API_KEY ? 'env' : 'none');
+  const health = key ? await testOmniKey(key, base) : { ok: false, status: 0, error: 'no key' };
+  res.json({ configured: !!key, masked: mask(key), base, source, health });
+});
+app.post('/api/admin/omnidim', adminOnly, rateLimit(10, 900), async (req, res) => {
+  const body = req.body || {};
+  const patch = {};
+  if (typeof body.apiKey === 'string' && body.apiKey.trim() && !body.apiKey.startsWith('****')) patch.apiKey = body.apiKey.trim();
+  if (typeof body.apiBase === 'string' && body.apiBase.trim()) patch.apiBase = body.apiBase.trim();
+  if (!Object.keys(patch).length) return res.status(400).json({ error: 'Nothing to update. Paste a new key (or base URL) to change it.' });
+  // Validate the new key against OmniDim before saving, so a bad key can't break calling.
+  if (patch.apiKey) {
+    const t = await testOmniKey(patch.apiKey, patch.apiBase || omniBase());
+    if (!t.ok) return res.status(400).json({ error: `That OmniDim key failed validation (HTTP ${t.status || 'no response'}). Nothing was changed.`, health: t });
+  }
+  saveIntegSection('omnidim', patch);
+  await db.flush().catch(() => {});
+  invalidateAllUsage();
+  res.json({ ok: true, masked: mask(omniKey()), base: omniBase(), health: await testOmniKey(omniKey(), omniBase()) });
+});
+app.post('/api/admin/omnidim/test', adminOnly, async (req, res) => {
+  res.json(await testOmniKey(omniKey(), omniBase()));
+});
+// Clear a stored (dashboard) key so it falls back to the OMNIDIM_API_KEY env var.
+app.delete('/api/admin/omnidim', adminOnly, async (req, res) => {
+  saveIntegSection('omnidim', { apiKey: '', apiBase: '' });
+  await db.flush().catch(() => {});
+  res.json({ ok: true, source: process.env.OMNIDIM_API_KEY ? 'env' : 'none', masked: mask(omniKey()) });
 });
 app.post('/api/admin/integrations/test/:name', adminOnly, async (req, res) => {
   const name = req.params.name;
