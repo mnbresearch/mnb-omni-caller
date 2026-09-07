@@ -603,8 +603,12 @@ async function loadStudio() {
     var _langSel = $('agLanguages');
     if (_langSel) {
       var cur = studioAgent.languages || studioAgent.supported_languages || [];
-      var curSet = new Set((Array.isArray(cur) ? cur : []).map(function (x) { return String(x).toLowerCase(); }));
-      [].forEach.call(_langSel.options, function (o) { o.selected = curSet.has(o.value.toLowerCase()); });
+      cur = Array.isArray(cur) ? cur : [];
+      var optSet = {}; [].forEach.call(_langSel.options, function (o) { optSet[o.value.toLowerCase()] = 1; });
+      var curSet = {}; cur.forEach(function (x) { curSet[String(x).toLowerCase()] = 1; });
+      [].forEach.call(_langSel.options, function (o) { o.selected = !!curSet[o.value.toLowerCase()]; });
+      var others = cur.filter(function (x) { return !optSet[String(x).toLowerCase()]; });
+      var _o = $('agLanguagesOther'); if (_o) _o.value = others.join(', ');
     }
     const sections = studioAgent.context_breakdown || [];
     $('sections').innerHTML = '';
@@ -682,7 +686,11 @@ async function saveAgent() {
   }
   if ($('agModel').value) body.model = { model: $('agModel').value };
   var _lang = $('agLanguages');
-  if (_lang) { var langs = [].filter.call(_lang.options, function (o) { return o.selected; }).map(function (o) { return o.value; }); if (langs.length) body.languages = langs; }
+  var langs = _lang ? [].filter.call(_lang.options, function (o) { return o.selected; }).map(function (o) { return o.value; }) : [];
+  var _other = $('agLanguagesOther');
+  if (_other && _other.value.trim()) { _other.value.split(',').forEach(function (x) { x = x.trim(); if (x) langs.push(x); }); }
+  var _seen = {}; langs = langs.filter(function (x) { var k = x.toLowerCase(); if (_seen[k]) return false; _seen[k] = 1; return true; });
+  if (langs.length) body.languages = langs;
   $('saveAgentBtn').disabled = true;
   try {
     await api('/agents/' + id, { method: 'PUT', body });
