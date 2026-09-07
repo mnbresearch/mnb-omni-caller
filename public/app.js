@@ -599,6 +599,13 @@ async function loadStudio() {
     $('agVoiceId').disabled = true;
     $('agModel').value = '';
     $('agSpeed').value = '';
+    // Preselect the agent's current languages (display-name strings from OmniDim).
+    var _langSel = $('agLanguages');
+    if (_langSel) {
+      var cur = studioAgent.languages || studioAgent.supported_languages || [];
+      var curSet = new Set((Array.isArray(cur) ? cur : []).map(function (x) { return String(x).toLowerCase(); }));
+      [].forEach.call(_langSel.options, function (o) { o.selected = curSet.has(o.value.toLowerCase()); });
+    }
     const sections = studioAgent.context_breakdown || [];
     $('sections').innerHTML = '';
     sections.forEach((s) => addSection(s.context_title ?? s.title ?? '', s.context_body ?? s.body ?? ''));
@@ -674,6 +681,8 @@ async function saveAgent() {
     body.voice = { speech_speed: Number($('agSpeed').value) };
   }
   if ($('agModel').value) body.model = { model: $('agModel').value };
+  var _lang = $('agLanguages');
+  if (_lang) { var langs = [].filter.call(_lang.options, function (o) { return o.selected; }).map(function (o) { return o.value; }); if (langs.length) body.languages = langs; }
   $('saveAgentBtn').disabled = true;
   try {
     await api('/agents/' + id, { method: 'PUT', body });
@@ -4435,4 +4444,90 @@ async function detachNumber(numberId) {
   }
   // If the app deep-links to #numbers on load, still inject.
   setTimeout(function () { if ((location.hash || '').indexOf('numbers') > -1) injectImport(); }, 1400);
+})();
+
+/* =======================================================================
+ * MNB Omni Caller - v27 layer
+ * Super Admin: rotate the OmniDim master API key from the Admin panel,
+ * with live connection status and validation-before-save. Additive, guarded.
+ * ==================================================================== */
+(function () {
+  if (window.__mnbEnhanced27) return; window.__mnbEnhanced27 = true;
+  var T = function (m, ms) { try { toast(m, ms); } catch (e) {} };
+  var el = function (id) { return document.getElementById(id); };
+
+  var prev = window.switchView;
+  window.switchView = function (view) {
+    var r = prev.apply(this, arguments);
+    if (view === 'admin') setTimeout(inject, 300);
+    return r;
+  };
+
+  function healthHtml(h) {
+    if (!h) return '';
+    return h.ok
+      ? '<span style="color:#43b97f;font-weight:700">connected (HTTP ' + h.status + ')</span>'
+      : '<span style="color:#ff8a8a;font-weight:700">NOT connected (HTTP ' + (h.status || 'no response') + ')</span>';
+  }
+
+  async function refresh() {
+    var s = el('mnbSAstatus'); if (!s) return;
+    try {
+      var d = await fetch('/api/admin/omnidim', { cache: 'no-store' }).then(function (r) { return r.json(); });
+      s.innerHTML = 'Current key: <b>' + (d.masked || '(none set)') + '</b> &#183; source: <b>' + (d.source || '?') +
+        '</b> &#183; status: ' + healthHtml(d.health) + '<br><span class="muted">Base: ' + (d.base || '') + '</span>';
+    } catch (e) { s.textContent = 'Could not load OmniDim key status.'; }
+  }
+
+  async function save() {
+    var key = el('mnbSAkey').value.trim(), base = el('mnbSAbase').value.trim();
+    if (!key && !base) return T('Paste a new OmniDim key to rotate it');
+    var b = el('mnbSAsave'); b.disabled = true; b.textContent = 'Validating...';
+    try {
+      var r = await fetch('/api/admin/omnidim', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey: key, apiBase: base }) });
+      var j = await r.json().catch(function () { return {}; });
+      if (r.ok) { T('OmniDim key validated and saved - it is now live for all calls.', 6000); el('mnbSAkey').value = ''; el('mnbSAbase').value = ''; refresh(); }
+      else T(j.error || 'Could not update the key', 7000);
+    } catch (e) { T('Network error. Please try again.'); }
+    b.disabled = false; b.textContent = 'Validate & save key';
+  }
+
+  async function test() {
+    var b = el('mnbSAtest'); b.disabled = true;
+    try { var r = await fetch('/api/admin/omnidim/test', { method: 'POST' }).then(function (x) { return x.json(); });
+      T(r.ok ? ('OmniDim connected (HTTP ' + r.status + ')') : ('OmniDim NOT connected (HTTP ' + (r.status || 'no response') + ')'), 6000); refresh();
+    } catch (e) { T('Network error'); }
+    b.disabled = false;
+  }
+
+  async function resetKey() {
+    if (!confirm('Clear the dashboard-set key and fall back to the OMNIDIM_API_KEY environment variable?')) return;
+    try { await fetch('/api/admin/omnidim', { method: 'DELETE' }).then(function (x) { return x.json(); }); T('Reset to the environment key.'); refresh(); }
+    catch (e) { T('Network error'); }
+  }
+
+  function inject() {
+    var v = el('view-admin'); if (!v || el('mnbSA')) return;
+    var card = document.createElement('div');
+    card.className = 'vx-card'; card.id = 'mnbSA'; card.style.marginBottom = '16px';
+    card.innerHTML =
+      '<h3>&#128273; Super Admin &#8212; OmniDim master key</h3>' +
+      '<p class="vx-sub">This key powers every client call. Rotate it here any time &#8212; no redeploy needed. A new key is validated against OmniDim <b>before</b> it is saved, so a wrong key can never take the platform offline.</p>' +
+      '<div id="mnbSAstatus" class="vx-sub">Checking status...</div>' +
+      '<div class="vx-f"><label>New OmniDim API key</label><input id="mnbSAkey" type="password" autocomplete="off" placeholder="Paste a new OmniDim API key to rotate"></div>' +
+      '<div class="vx-f"><label>API base URL <span class="muted">(optional, advanced)</span></label><input id="mnbSAbase" type="text" placeholder="https://backend.omnidim.io/api/v1"></div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+        '<button class="vx-btn" id="mnbSAsave">Validate &amp; save key</button>' +
+        '<button class="vx-btn ghost" id="mnbSAtest">Test current key</button>' +
+        '<button class="vx-btn danger" id="mnbSAreset">Reset to env key</button>' +
+      '</div>';
+    var anchor = v.querySelector('.card');
+    if (anchor) v.insertBefore(card, anchor); else v.appendChild(card);
+    el('mnbSAsave').addEventListener('click', save);
+    el('mnbSAtest').addEventListener('click', test);
+    el('mnbSAreset').addEventListener('click', resetKey);
+    refresh();
+  }
+
+  setTimeout(function () { if ((location.hash || '').indexOf('admin') > -1) inject(); }, 1500);
 })();
