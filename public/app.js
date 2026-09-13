@@ -4539,3 +4539,91 @@ async function detachNumber(numberId) {
 
   setTimeout(function () { if ((location.hash || '').indexOf('admin') > -1) inject(); }, 1500);
 })();
+
+/* =======================================================================
+ * MNB Omni Caller - v28 layer
+ * Admin Number Shop: search + buy Indian (and US) numbers in a couple of
+ * clicks, then delegate to a client. Additive, guarded, admin-only view.
+ * ==================================================================== */
+(function () {
+  if (window.__mnbEnhanced28) return; window.__mnbEnhanced28 = true;
+  var T = function (m, ms) { try { toast(m, ms); } catch (e) {} };
+  var E = function (s) { try { return esc(s); } catch (e) { return String(s == null ? '' : s); } };
+  var el = function (id) { return document.getElementById(id); };
+
+  var CARRIERS = {
+    IN: [
+      { id: 'carrier-2-new', label: 'Mobile (94 / 79 series)' },
+      { id: 'carrier-1', label: 'Landline (city codes 11, 12, 80)' }
+    ],
+    US: [{ id: 'carrier-us', label: 'US local (by area code)' }]
+  };
+
+  var prev = window.switchView;
+  window.switchView = function (view) {
+    var r = prev.apply(this, arguments);
+    if (view === 'admin') setTimeout(inject, 380);
+    return r;
+  };
+
+  function carrierOptions(region) {
+    return (CARRIERS[region] || []).map(function (c) { return '<option value="' + c.id + '">' + c.label + '</option>'; }).join('');
+  }
+
+  function inject() {
+    var v = el('view-admin'); if (!v || el('mnbShop')) return;
+    var card = document.createElement('div');
+    card.className = 'vx-card'; card.id = 'mnbShop'; card.style.marginBottom = '16px';
+    card.innerHTML =
+      '<h3>&#9742; Number Shop &#8212; buy an Indian (or US) number</h3>' +
+      '<p class="vx-sub">Search the OmniDim number shop and buy a number in a couple of clicks, then delegate it to a client below. The rental comes out of your OmniDim wallet. <b>Indian numbers</b> need a one-time Aadhaar eKYC on your OmniDim account first (do it once in the OmniDim dashboard).</p>' +
+      '<div class="vx-row">' +
+        '<div class="vx-f" style="min-width:130px"><label>Region</label><select id="shopRegion"><option value="IN" selected>India (IN)</option><option value="US">United States (US)</option></select></div>' +
+        '<div class="vx-f" style="min-width:230px;flex:1"><label>Type / carrier</label><select id="shopCarrier">' + carrierOptions('IN') + '</select></div>' +
+        '<div class="vx-f" style="min-width:150px"><label>Pattern (optional)</label><input id="shopPattern" placeholder="e.g. 80 or 555"></div>' +
+        '<button class="vx-btn" id="shopSearch">Search numbers</button>' +
+      '</div>' +
+      '<div id="shopResults" style="margin-top:10px"></div>';
+    var anchor = v.querySelector('.card');
+    if (anchor) v.insertBefore(card, anchor); else v.appendChild(card);
+    el('shopRegion').addEventListener('change', function () { el('shopCarrier').innerHTML = carrierOptions(this.value); });
+    el('shopSearch').addEventListener('click', search);
+  }
+
+  async function search() {
+    var region = el('shopRegion').value, carrier = el('shopCarrier').value, pattern = el('shopPattern').value.trim();
+    var box = el('shopResults'); box.innerHTML = '<p class="vx-sub">Searching the ' + E(region) + ' number shop...</p>';
+    var b = el('shopSearch'); b.disabled = true;
+    try {
+      var qs = 'region=' + encodeURIComponent(region) + '&carrier=' + encodeURIComponent(carrier) + (pattern ? '&pattern=' + encodeURIComponent(pattern) : '') + '&limit=20';
+      var r = await fetch('/api/admin/numbers/search?' + qs, { cache: 'no-store' });
+      var j = await r.json().catch(function () { return {}; });
+      if (!r.ok) { box.innerHTML = '<p class="vx-sub" style="color:#ffb0a0">' + E((j && (j.error || j.message)) || ('Search failed (HTTP ' + r.status + ')')) + (j && j.carriers ? ' Available carriers: ' + E(JSON.stringify(j.carriers)) : '') + '</p>'; return; }
+      var nums = j.numbers || j.available || [];
+      if (!nums.length) { box.innerHTML = '<p class="vx-sub">No numbers found for that search. Try a different pattern or carrier.</p>'; return; }
+      box.innerHTML = '<table class="vx-tbl" style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:6px">Number</th><th style="text-align:left;padding:6px">Monthly rental</th><th style="text-align:left;padding:6px">KYC</th><th></th></tr></thead><tbody>' +
+        nums.map(function (n) {
+          var num = n.phone_number || n.number || n;
+          var rent = (n.monthly_rental_usd != null) ? ('$' + n.monthly_rental_usd + '/mo') : '';
+          var kyc = n.kyc_required ? 'Aadhaar eKYC' : '-';
+          return '<tr><td style="padding:6px;font-family:monospace">' + E(num) + '</td><td style="padding:6px">' + E(rent) + '</td><td style="padding:6px">' + E(kyc) + '</td>' +
+            '<td style="padding:6px"><button class="vx-btn" data-buy="' + E(num) + '" data-region="' + E(region) + '" style="padding:6px 12px">Buy</button></td></tr>';
+        }).join('') + '</tbody></table>';
+      box.querySelectorAll('[data-buy]').forEach(function (btn) { btn.addEventListener('click', function () { buy(btn.getAttribute('data-buy'), btn.getAttribute('data-region'), btn); }); });
+    } catch (e) { box.innerHTML = '<p class="vx-sub" style="color:#ffb0a0">Network error. Please try again.</p>'; }
+    b.disabled = false;
+  }
+
+  async function buy(number, region, btn) {
+    if (!confirm('Buy ' + number + ' (' + region + ')? The monthly rental will be charged to your OmniDim wallet.')) return;
+    btn.disabled = true; btn.textContent = 'Buying...';
+    try {
+      var r = await fetch('/api/admin/numbers/purchase', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ region: region, phone_number: number }) });
+      var j = await r.json().catch(function () { return {}; });
+      if (r.ok && (j.success !== false)) { T('Number purchased: ' + number + '. Now delegate it to a client below.', 7000); btn.textContent = 'Purchased'; }
+      else { T((j && (j.error || j.message)) || 'Purchase failed', 7000); btn.disabled = false; btn.textContent = 'Buy'; }
+    } catch (e) { T('Network error'); btn.disabled = false; btn.textContent = 'Buy'; }
+  }
+
+  setTimeout(function () { if ((location.hash || '').indexOf('admin') > -1) inject(); }, 1600);
+})();
