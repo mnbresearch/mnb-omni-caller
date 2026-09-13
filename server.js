@@ -12,6 +12,8 @@ const demo = require('./demo');
 
 const app = express();
 const crypto = require('crypto');
+const net = require('net');
+const dnsp = require('dns').promises;
 // Capture the raw request body so we can verify payment-webhook signatures.
 app.use(express.json({ limit: '30mb', verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
@@ -1173,12 +1175,45 @@ app.post('/api/knowledge/upload-text', async (req, res) => {
     await forwardKbUpload(req, res, safePdfName(title || 'document'), b64);
   } catch (err) { res.status(500).json({ error: 'Conversion failed', detail: String(err.message || err) }); }
 });
+// SSRF guard: reject URLs that resolve to private / link-local / loopback /
+// cloud-metadata addresses, so the "import a web page" feature can never be
+// used to read internal services (e.g. 169.254.169.254) from the server.
+function isPrivateIp(ip) {
+  if (net.isIP(ip) === 4) {
+    const p = ip.split('.').map(Number);
+    if (p[0] === 10 || p[0] === 127 || p[0] === 0) return true;
+    if (p[0] === 169 && p[1] === 254) return true;
+    if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return true;
+    if (p[0] === 192 && p[1] === 168) return true;
+    if (p[0] === 100 && p[1] >= 64 && p[1] <= 127) return true; // CGNAT
+    if (p[0] >= 224) return true; // multicast / reserved
+    return false;
+  }
+  const l = String(ip).toLowerCase();
+  if (l === '::1' || l === '::' || l.startsWith('fc') || l.startsWith('fd') || l.startsWith('fe80')) return true;
+  if (l.startsWith('::ffff:')) return isPrivateIp(l.replace('::ffff:', ''));
+  return false;
+}
+async function assertPublicUrl(raw) {
+  let u; try { u = new URL(raw); } catch (e) { throw new Error('That does not look like a valid URL.'); }
+  if (!/^https?:$/.test(u.protocol)) throw new Error('Only http and https links can be imported.');
+  if (u.username || u.password) throw new Error('URLs with embedded credentials are not allowed.');
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.localhost')) throw new Error('That address is not allowed.');
+  let addrs = [];
+  if (net.isIP(host)) addrs = [host];
+  else { try { addrs = (await dnsp.lookup(host, { all: true })).map((a) => a.address); } catch (e) { throw new Error('Could not resolve that website address.'); } }
+  if (!addrs.length || addrs.some(isPrivateIp)) throw new Error('That URL points to a private or internal address and cannot be imported.');
+  return u.toString();
+}
 app.post('/api/knowledge/upload-url', async (req, res) => {
   try {
     let { url } = req.body || {};
     if (!url) return res.status(400).json({ error: 'No URL provided' });
     if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
-    const page = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (MNB Omni Caller KB fetcher)' }, redirect: 'follow' });
+    try { url = await assertPublicUrl(url); } catch (e) { return res.status(400).json({ error: e.message }); }
+    const ctrl = new AbortController(); const _t = setTimeout(() => ctrl.abort(), 12000);
+    const page = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (MNB Omni Caller KB fetcher)' }, redirect: 'follow', signal: ctrl.signal }).finally(() => clearTimeout(_t));
     if (!page.ok) return res.status(400).json({ error: `Could not fetch page (HTTP ${page.status})` });
     const html = await page.text();
     const text = html
@@ -1271,7 +1306,23 @@ app.post('/api/numbers/detach', adminOnly, relay('POST', '/phone_number/detach')
 // Admin-only so number cost stays controlled by MNB. Use these to fulfil a
 // client's number request, then delegate the number from the Admin panel.
 app.get('/api/admin/numbers/search', adminOnly, relay('GET', '/phone_number/search', { passQuery: true }));
-app.post('/api/admin/numbers/purchase', adminOnly, relay('POST', '/phone_number/purchase'));
+// Buy a number from the OmniDim shop (region IN or US). Spends the pooled
+// OmniDim wallet, so admin-only. Sends an Idempotency-Key so a timed-out retry
+// never double-charges. India numbers need a one-time Aadhaar eKYC on the
+// OmniDim account first (done in the OmniDim dashboard).
+app.post('/api/admin/numbers/purchase', adminOnly, async (req, res) => {
+  try {
+    const body = req.body || {};
+    if (!body.phone_number || !body.region) return res.status(400).json({ error: 'region and phone_number are required.' });
+    const resp = await fetch(omniBase() + '/phone_number/purchase', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${omniKey()}`, 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+      body: JSON.stringify({ region: body.region, phone_number: body.phone_number }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    res.status(resp.status).json(data);
+  } catch (e) { res.status(502).json({ error: 'Could not complete the purchase. Please try again.', detail: String(e.message || e) }); }
+});
 app.post('/api/admin/numbers/release', adminOnly, relay('POST', '/phone_number/release'));
 app.get('/api/voices', relay('GET', '/providers/voices', { passQuery: true }));
 app.get('/api/voices/:id', relay('GET', (r) => `/providers/voices/${r.params.id}`));
