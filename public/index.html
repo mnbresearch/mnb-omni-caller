@@ -197,7 +197,10 @@
           </div>
           <div>
             <label>Voice</label>
+            <input id="agVoiceSearch" type="text" placeholder="Search voices &#8212; e.g. Indian, female, professional" oninput="filterVoiceOptions()" class="hidden" style="margin-bottom:6px" />
             <select id="agVoiceId" disabled><option value="">Pick a provider first</option></select>
+            <button type="button" class="btn ghost small hidden" id="agVoicePreviewBtn" onclick="previewVoice()" style="margin-top:6px">&#9654; Preview voice</button>
+            <audio id="agVoiceAudio" preload="none"></audio>
           </div>
         </div>
         <div class="two-col tight">

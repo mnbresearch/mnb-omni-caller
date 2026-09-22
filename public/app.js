@@ -615,10 +615,13 @@ async function loadStudio() {
     if (_langSel) {
       var cur = studioAgent.languages || studioAgent.supported_languages || [];
       cur = Array.isArray(cur) ? cur : [];
+      // OmniDim may return languages as strings OR as objects; normalize to display-name strings.
+      var _lname = function (x) { if (x == null) return ''; if (typeof x === 'string') return x; return x.name || x.language || x.display_name || x.label || x.value || x.code || ''; };
+      var curNames = cur.map(_lname).filter(Boolean);
       var optSet = {}; [].forEach.call(_langSel.options, function (o) { optSet[o.value.toLowerCase()] = 1; });
-      var curSet = {}; cur.forEach(function (x) { curSet[String(x).toLowerCase()] = 1; });
+      var curSet = {}; curNames.forEach(function (x) { curSet[String(x).toLowerCase()] = 1; });
       [].forEach.call(_langSel.options, function (o) { o.selected = !!curSet[o.value.toLowerCase()]; });
-      var others = cur.filter(function (x) { return !optSet[String(x).toLowerCase()]; });
+      var others = curNames.filter(function (x) { return !optSet[String(x).toLowerCase()]; });
       var _o = $('agLanguagesOther'); if (_o) _o.value = others.join(', ');
     }
     const sections = studioAgent.context_breakdown || [];
@@ -645,25 +648,59 @@ async function loadLlms() {
   } catch { /* optional */ }
 }
 
+var __voiceCache = [];
+function renderVoiceOptions(list) {
+  const sel = $('agVoiceId');
+  sel.innerHTML = list.length
+    ? list.map((v) => {
+        const vid = v.name || v.voice_id || v.external_id || v.id;
+        const tags = Array.isArray(v.tags) ? v.tags.join(' \u00B7 ') : [v.gender, v.accent || v.language].filter(Boolean).join(' \u00B7 ');
+        const label = [v.display_name || v.voice_name || v.name, tags].filter(Boolean).join(' \u2014 ');
+        return `<option value="${esc(vid)}" data-sample="${esc(v.sample_url || v.preview_url || '')}">${show(label || vid)}</option>`;
+      }).join('')
+    : '<option value="">No voices found</option>';
+}
 async function loadVoiceOptions() {
   const provider = $('agVoiceProvider').value;
   const sel = $('agVoiceId');
-  if (!provider) { sel.innerHTML = '<option value="">Pick a provider first</option>'; sel.disabled = true; return; }
+  const search = $('agVoiceSearch');
+  const pbtn = $('agVoicePreviewBtn');
+  if (!provider) {
+    sel.innerHTML = '<option value="">Pick a provider first</option>'; sel.disabled = true; __voiceCache = [];
+    if (search) { search.classList.add('hidden'); search.value = ''; }
+    if (pbtn) pbtn.classList.add('hidden');
+    return;
+  }
   sel.disabled = false;
   sel.innerHTML = '<option value="">Loading voices\u2026</option>';
   try {
     const data = await api('/voices?provider=' + encodeURIComponent(provider) + '&page=1&page_size=100');
-    const voices = data.voices || [];
-    sel.innerHTML = voices.length
-      ? voices.map((v) => {
-          const vid = v.name || v.voice_id || v.external_id || v.id;
-          const label = [v.display_name || v.voice_name || v.name, v.gender, v.accent || v.language].filter(Boolean).join(' \u00B7 ');
-          return `<option value="${esc(vid)}">${show(label || vid)}</option>`;
-        }).join('')
-      : '<option value="">No voices found for this provider</option>';
+    __voiceCache = data.voices || [];
+    renderVoiceOptions(__voiceCache);
+    if (search) { search.classList.remove('hidden'); search.value = ''; }
+    if (pbtn) pbtn.classList.remove('hidden');
   } catch (e) {
     sel.innerHTML = '<option value="">Could not load voices</option>';
   }
+}
+function filterVoiceOptions() {
+  const q = (($('agVoiceSearch') || {}).value || '').toLowerCase().trim();
+  if (!q) { renderVoiceOptions(__voiceCache); return; }
+  const f = __voiceCache.filter(function (v) {
+    const hay = [v.display_name, v.name, (Array.isArray(v.tags) ? v.tags.join(' ') : ''), v.gender, v.accent, v.language].filter(Boolean).join(' ').toLowerCase();
+    return hay.indexOf(q) !== -1;
+  });
+  renderVoiceOptions(f);
+}
+function previewVoice() {
+  const sel = $('agVoiceId');
+  const opt = sel.options[sel.selectedIndex];
+  const url = opt ? opt.getAttribute('data-sample') : '';
+  const au = $('agVoiceAudio');
+  if (!url) { toast('Pick a voice first to preview its sample'); return; }
+  if (!au) return;
+  try { au.pause(); au.src = url; au.play(); toast('Playing voice sample\u2026'); }
+  catch (e) { toast('Could not play this sample'); }
 }
 
 function addSection(title = '', body = '') {
