@@ -213,6 +213,10 @@
             <input id="agSpeed" type="number" min="0.5" max="2" step="0.1" placeholder="1.0" />
           </div>
         </div>
+        <div>
+          <label>Transcription <span class="muted">(speech-to-text engine that hears the caller)</span></label>
+          <select id="agStt"><option value="">Keep current</option></select>
+        </div>
         <label>Languages the agent speaks <span class="muted">(Ctrl/Cmd-click to pick several &#8212; the agent auto-detects and switches between them mid-call)</span></label>
         <select id="agLanguages" multiple size="10" style="min-height:220px">
           <optgroup label="Popular">

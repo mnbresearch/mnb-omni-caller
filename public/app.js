@@ -629,9 +629,38 @@ async function loadStudio() {
     sections.forEach((s) => addSection(s.context_title ?? s.title ?? '', s.context_body ?? s.body ?? ''));
     if (!sections.length) addSection();
     loadLlms();
+    loadStt(studioAgent.asr_service || studioAgent.stt_service);
   } catch (e) {
     toast('Could not load agent: ' + e.message, 5000);
   }
+}
+
+var sttLoaded = false;
+async function loadStt(current) {
+  const sel = $('agStt');
+  if (!sel) return;
+  try {
+    if (!sttLoaded) {
+      const data = await api('/providers/stt');
+      const list = data.stt || data.providers || (Array.isArray(data) ? data : []);
+      const names = list.map((s) => (typeof s === 'string' ? s : s.name)).filter(Boolean);
+      if (names.length) {
+        sel.innerHTML = '<option value="">Keep current</option>' +
+          names.map((n) => `<option value="${esc(n)}">${show(n)}</option>`).join('');
+        sttLoaded = true;
+      }
+    }
+    if (current) {
+      sel.value = current;
+      if (sel.value !== current) {
+        // Current engine not in the list yet; add it so it displays.
+        sel.insertAdjacentHTML('beforeend', `<option value="${esc(current)}">${show(current)}</option>`);
+        sel.value = current;
+      }
+    } else {
+      sel.value = '';
+    }
+  } catch (e) { /* optional */ }
 }
 
 async function loadLlms() {
@@ -733,6 +762,7 @@ async function saveAgent() {
     body.voice = { speech_speed: Number($('agSpeed').value) };
   }
   if ($('agModel').value) body.model = { model: $('agModel').value };
+  if ($('agStt') && $('agStt').value) body.asr_service = $('agStt').value;
   var _lang = $('agLanguages');
   var langs = _lang ? [].filter.call(_lang.options, function (o) { return o.selected; }).map(function (o) { return o.value; }) : [];
   var _other = $('agLanguagesOther');
