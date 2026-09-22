@@ -115,6 +115,7 @@ function applyRoleUi() {
   // Self-service SaaS: any signed-in account (admin or client) can create and
   // train its own agents. Only the read-only demo is prevented from writing.
   $('newAgentBtn').classList.toggle('hidden', !!demo);
+  var _snb = $('studioNewAgentBtn'); if (_snb) _snb.classList.toggle('hidden', !!demo);
   $('demoBanner').classList.toggle('hidden', !demo);
   const delBtn = document.querySelector('#view-studio .view-head .btn.ghost[onclick="deleteAgent()"]');
   if (delBtn) delBtn.classList.toggle('hidden', !!demo);
@@ -588,7 +589,17 @@ let llmsLoaded = false;
 
 async function loadStudio() {
   const id = activeAgentId();
-  if (!id) return;
+  // Empty state: no agent yet -> show the "create your first agent" prompt and
+  // hide the config cards so the Studio never looks blank/broken.
+  var _cards = document.querySelectorAll('#view-studio > .card');
+  var _empty = $('studioEmpty');
+  if (!id) {
+    if (_empty) _empty.classList.remove('hidden');
+    _cards.forEach(function (c) { if (c.id !== 'studioEmpty') c.classList.add('hidden'); });
+    return;
+  }
+  if (_empty) _empty.classList.add('hidden');
+  _cards.forEach(function (c) { if (c.id !== 'studioEmpty') c.classList.remove('hidden'); });
   try {
     studioAgent = await api('/agents/' + id);
     $('agName').value = scrub(studioAgent.name || '');

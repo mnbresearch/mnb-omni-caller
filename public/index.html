@@ -156,11 +156,17 @@
       <header class="view-head">
         <h2>Agent Studio</h2>
         <div>
+          <button class="btn primary" id="studioNewAgentBtn" onclick="openAgentModal()">+ New agent</button>
           <button class="btn ghost" onclick="deleteAgent()" style="color:var(--bad)">Delete agent</button>
           <button class="btn ghost" onclick="loadStudio()">&#8635; Reload</button>
           <button class="btn primary" id="saveAgentBtn" onclick="saveAgent()">Save changes</button>
         </div>
       </header>
+      <div id="studioEmpty" class="card hidden" style="text-align:center;padding:40px 24px">
+        <h3 style="margin-bottom:8px">You don't have an agent yet</h3>
+        <p class="muted" style="margin-bottom:18px">Create your first AI agent to start training it, then place calls. It takes under a minute.</p>
+        <button class="btn primary big" onclick="openAgentModal()">+ Create your first agent</button>
+      </div>
       <div class="card">
         <h3>Identity</h3>
         <div class="two-col tight">
