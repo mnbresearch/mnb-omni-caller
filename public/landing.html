@@ -56,11 +56,14 @@ h3{font-size:1.06rem}
 /* ===== nav ===== */
 nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(12px);background:rgba(11,11,12,.78);border-bottom:1px solid var(--border)}
 nav .wrap{display:flex;align-items:center;justify-content:space-between;height:66px}
-nav .links{display:flex;gap:24px;align-items:center}
-nav .links a{color:var(--muted);font-weight:600;font-size:.9rem}
+nav .links{display:flex;gap:20px;align-items:center}
+nav .links a{color:var(--muted);font-weight:600;font-size:.9rem;white-space:nowrap}
 nav .links a:hover{color:var(--text)}
-nav .cta{display:flex;gap:10px;align-items:center}
-@media(max-width:980px){nav .links{display:none}}
+nav .cta{display:flex;gap:10px;align-items:center;flex-shrink:0}
+nav .cta .btn{white-space:nowrap}
+nav .logo{flex-shrink:0}
+@media(max-width:1120px){nav .links{gap:16px;font-size:.86rem}}
+@media(max-width:1040px){nav .links{display:none}}
 
 /* ===== hero ===== */
 .hero{position:relative;padding:76px 0 60px;overflow:hidden}
@@ -210,7 +213,7 @@ footer .bot{border-top:1px solid var(--border);padding-top:20px;display:flex;jus
       <span>MNB Research<br><span class="lsub grad-text">Omni Caller</span></span>
     </a>
     <div class="links">
-      <a href="#problems">Problems we solve</a>
+      <a href="#problems">Problems</a>
       <a href="#build">Build an agent</a>
       <a href="#capabilities">Capabilities</a>
       <a href="#usecases">Industries</a>
