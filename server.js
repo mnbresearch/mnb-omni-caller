@@ -23,10 +23,17 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
-  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
   res.removeHeader('X-Powered-By');
   next();
 });
+
+// Session cookies must be Secure in production so the token can never be sent
+// over plain HTTP. Local HTTP development still works (flag omitted there).
+const COOKIE_SECURE = (process.env.VERCEL || process.env.NODE_ENV === 'production') ? '; Secure' : '';
+function sessionCookie(token, maxAgeSec) {
+  return `mnb_session=${token}; HttpOnly; Path=/; SameSite=Lax${COOKIE_SECURE}; Max-Age=${maxAgeSec}`;
+}
 
 // Per-IP rate limiter for public endpoints (Redis-backed via db, fails open).
 function rateLimit(max, windowSec) {
@@ -262,7 +269,10 @@ async function sendContactEmail(m) {
 app.post('/api/auth/signup', rateLimit(5, 3600), async (req, res) => {
   const { org, email, password, contact, phone, note } = req.body || {};
   if (!org || !email || !password) return res.status(400).json({ error: 'Organization, email and password are required' });
-  if (String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  if (!EMAIL_RE.test(String(email).trim())) return res.status(400).json({ error: 'Please enter a valid email address.' });
+  if (String(org).length > 200 || String(email).length > 254) return res.status(400).json({ error: 'That organization name or email is too long.' });
+  if (String(password).length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  if (String(password).length > 200) return res.status(400).json({ error: 'That password is too long.' });
   if (db.findUserByEmail(email)) return res.status(409).json({ error: 'An account with this email already exists' });
   // Self-serve: account is active immediately with a zero minute balance so the
   // customer can sign in and buy a prepaid pack right away.
@@ -275,7 +285,7 @@ app.post('/api/auth/signup', rateLimit(5, 3600), async (req, res) => {
   notifyNewLead(user);            // fire-and-forget push alert (ntfy)
   sendAccessRequestEmails(user);  // fire-and-forget Resend emails (admin + welcome)
   onNewLead(user);                // fire-and-forget integration fan-out (Sheets/webhook/Slack/WhatsApp)
-  res.setHeader('Set-Cookie', `mnb_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=1209600`);
+  res.setHeader('Set-Cookie', sessionCookie(token, 1209600));
   res.json({ ok: true, activated: true, message: 'Your account is ready! Taking you to your dashboard...' });
 });
 
@@ -537,13 +547,13 @@ app.post('/api/auth/login', rateLimit(20, 900), async (req, res) => {
   if (user.status !== 'active') return res.status(403).json({ error: 'Your access has been revoked' });
   const token = db.createSession(user.id);
   await db.flush().catch(() => {}); // durable write before responding (serverless-safe)
-  res.setHeader('Set-Cookie', `mnb_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=1209600`);
+  res.setHeader('Set-Cookie', sessionCookie(token, 1209600));
   res.json({ ok: true });
 });
 
 app.post('/api/auth/logout', (req, res) => {
   db.destroySession(getToken(req) || '');
-  res.setHeader('Set-Cookie', 'mnb_session=; HttpOnly; Path=/; Max-Age=0');
+  res.setHeader('Set-Cookie', sessionCookie('', 0));
   res.json({ ok: true });
 });
 
@@ -553,7 +563,7 @@ app.post('/api/auth/demo', rateLimit(30, 3600), async (req, res) => {
   if (!u) return res.status(503).json({ error: 'Demo is warming up, please try again in a moment.' });
   const token = db.createSession(u.id);
   await db.flush().catch(() => {}); // durable write before responding (serverless-safe)
-  res.setHeader('Set-Cookie', `mnb_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=86400`);
+  res.setHeader('Set-Cookie', sessionCookie(token, 86400));
   res.json({ ok: true });
 });
 
@@ -564,7 +574,7 @@ app.post('/api/auth/change-password', rateLimit(10, 900), (req, res) => {
   if (user.demo) return res.status(403).json({ error: 'The demo account password cannot be changed.' });
   const { currentPassword, newPassword } = req.body || {};
   if (!db.verifyPassword(currentPassword || '', user.passHash)) return res.status(403).json({ error: 'Your current password is incorrect.' });
-  if (String(newPassword || '').length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters.' });
+  if (String(newPassword || '').length < 8) return res.status(400).json({ error: 'New password must be at least 8 characters.' });
   db.updateUser(user.id, { passHash: db.hashPassword(newPassword) });
   res.json({ ok: true, message: 'Password updated successfully.' });
 });
@@ -591,7 +601,7 @@ app.post('/api/auth/forgot-password', rateLimit(5, 3600), (req, res) => {
 // Reset password with a valid token.
 app.post('/api/auth/reset-password', rateLimit(10, 3600), (req, res) => {
   const { token, newPassword } = req.body || {};
-  if (String(newPassword || '').length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters.' });
+  if (String(newPassword || '').length < 8) return res.status(400).json({ error: 'New password must be at least 8 characters.' });
   const email = db.consumeResetToken(token);
   if (!email) return res.status(400).json({ error: 'This reset link is invalid or has expired. Please request a new one.' });
   const user = db.findUserByEmail(email);
