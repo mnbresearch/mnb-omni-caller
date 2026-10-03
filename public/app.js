@@ -176,7 +176,14 @@ async function exportLogsCsv() {
     }
     if (!all.length) return toast('No calls to export');
     const cols = ['time_of_call', 'bot_name', 'from_number', 'to_number', 'call_direction', 'call_duration', 'call_status', 'sentiment_score'];
-    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""').replace(/<br\/?>/gi, ' ')}"`;
+    // CSV cell quoting. Cells starting with = + - @ (or a leading tab/CR) are
+    // prefixed with ' so spreadsheet apps treat them as text, not formulas
+    // (prevents CSV/formula injection from call transcripts and contact data).
+    const esc = (v) => {
+      let t = String(v ?? '').replace(/<br\/?>/gi, ' ');
+      if (/^[=+\-@\t\r]/.test(t)) t = "'" + t;
+      return `"${t.replace(/"/g, '""')}"`;
+    };
     const csv = [cols.join(','), ...all.map((r) => cols.map((c) => esc(scrub(r[c]))).join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const a = document.createElement('a');
@@ -564,7 +571,7 @@ async function dispatchCall() {
     const r = await api('/calls/dispatch', { method: 'POST', body });
     const el = $('dispatchResult');
     el.className = 'result ok';
-    el.innerHTML = `\u2705 Call dispatched to <b>${esc(to)}</b> \u2014 status: <b>${show(r.status || 'queued')}</b>${r.requestId ? ` (ref #${r.requestId})` : ''}. The transcript will appear under Call Logs once the call ends.`;
+    el.innerHTML = `\u2705 Call dispatched to <b>${esc(to)}</b> \u2014 status: <b>${show(r.status || 'queued')}</b>${r.requestId ? ` (ref #${esc(r.requestId)})` : ''}. The transcript will appear under Call Logs once the call ends.`;
     el.classList.remove('hidden');
     const agentName = agents.find((a) => a.id === agentId)?.name || 'Agent';
     const h = $('dispatchHistory');
@@ -3601,7 +3608,7 @@ async function detachNumber(numberId) {
     res.innerHTML = header + '<div class="v19-tl">' + hits.map(function (l) {
       return '<div class="v19-ev"><div class="card2"><div style="display:flex;justify-content:space-between;gap:10px"><b>' + E(l.time_of_call || '') + '</b>' + badge(l.sentiment_score) + '</div>' +
         '<div class="muted" style="font-size:13px;margin-top:2px">' + E(l.call_status || '') + ' - ' + E(l.call_duration || '0:00') + '</div>' +
-        '<button class="v19-mini" data-an="' + l.id + '">AI analysis</button><div id="v19an_' + l.id + '"></div></div></div>';
+        '<button class="v19-mini" data-an="' + E(l.id) + '">AI analysis</button><div id="v19an_' + E(l.id) + '"></div></div></div>';
     }).join('') + '</div>';
     res.querySelectorAll('[data-an]').forEach(function (b) { b.addEventListener('click', function () { analyze(b.getAttribute('data-an')); }); });
     bindActs(num, digits);
@@ -3913,7 +3920,7 @@ async function detachNumber(numberId) {
 
   async function changePw() {
     var cur = document.getElementById('v21cur').value, nw = document.getElementById('v21new').value, cf = document.getElementById('v21conf').value;
-    if (nw.length < 6) return T('New password must be at least 6 characters');
+    if (nw.length < 8) return T('New password must be at least 8 characters');
     if (nw !== cf) return T('New passwords do not match');
     var b = document.getElementById('v21pwbtn'); b.disabled = true; var old = b.textContent; b.textContent = 'Updating...';
     try {

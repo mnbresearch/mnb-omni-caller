@@ -50,7 +50,7 @@ a.home{display:block;text-align:center;margin-top:16px;color:var(--accent2);text
   form.addEventListener('submit',async function(e){
     e.preventDefault();box.className='msg';box.textContent='';
     var pw=document.getElementById('pw').value,pw2=document.getElementById('pw2').value;
-    if(pw.length<6){show('err','Password must be at least 6 characters.');return;}
+    if(pw.length<8){show('err','Password must be at least 8 characters.');return;}
     if(pw!==pw2){show('err','The two passwords do not match.');return;}
     btn.disabled=true;var old=btn.textContent;btn.textContent='Resetting...';
     try{
