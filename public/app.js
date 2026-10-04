@@ -2885,7 +2885,29 @@ async function detachNumber(numberId) {
   var KEY = 'mnb_dnc';
   var d10 = function (s) { var d = String(s || '').replace(/[^\d]/g, ''); return d.length > 10 ? d.slice(-10) : d; };
   function load() { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return []; } }
-  function save(v) { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch (e) {} refreshBadge(); }
+  // The server is the real enforcement point (a browser-only list can be wiped,
+  // or bypassed by calling the API directly), so every change is pushed up and
+  // the server copy is merged in on load.
+  function pushToServer(v) {
+    try {
+      api('/blocklist', { method: 'PUT', body: { blocked: (v || []).map(function (x) { return x && x.num ? x.num : x; }) } })
+        .catch(function () { T('Saved here, but could not sync the Do-Not-Call list to the server.'); });
+    } catch (e) {}
+  }
+  function pullFromServer() {
+    try {
+      api('/blocklist').then(function (r) {
+        var remote = (r && r.blocked) || [];
+        if (!remote.length) return;
+        var local = load(); var seen = {};
+        local.forEach(function (x) { seen[d10(x.num)] = 1; });
+        remote.forEach(function (n) { if (!seen[d10(n)]) local.push({ num: n, reason: 'Synced from server', at: Date.now() }); });
+        try { localStorage.setItem(KEY, JSON.stringify(local)); } catch (e) {}
+        refreshBadge();
+      }).catch(function () {});
+    } catch (e) {}
+  }
+  function save(v) { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch (e) {} pushToServer(v); refreshBadge(); }
   function isDnc(num) { var k = d10(num); if (!k) return false; return load().some(function (x) { return d10(x.num) === k; }); }
   function addDnc(num, reason) { if (!num) return; var l = load(); if (isDnc(num)) return; l.unshift({ num: num, reason: reason || '', at: Date.now() }); save(l); }
 
@@ -2933,6 +2955,7 @@ async function detachNumber(numberId) {
   }
 
   function loadDnc() {
+    pullFromServer(); // merge in anything blocked from another device/session
     var l = load();
     vDnc.innerHTML =
       '<header class="view-head"><h2>Do-Not-Call list</h2><p class="muted">Numbers here are blocked from dialing - you get a warning before any call. Great for compliance and opt-outs.</p></header>' +
