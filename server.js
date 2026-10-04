@@ -15,7 +15,12 @@ const crypto = require('crypto');
 const net = require('net');
 const dnsp = require('dns').promises;
 // Capture the raw request body so we can verify payment-webhook signatures.
-app.use(express.json({ limit: '30mb', verify: (req, _res, buf) => { req.rawBody = buf; } }));
+// Body limits: only the knowledge-base upload needs a large body (files arrive
+// base64-encoded in JSON). Everything else is capped at 1 MB so a single huge
+// POST cannot be used to exhaust memory on a serverless instance.
+const jsonWithRaw = (limit) => express.json({ limit, verify: (req, _res, buf) => { req.rawBody = buf; } });
+app.use('/api/knowledge', jsonWithRaw('30mb'));
+app.use(jsonWithRaw('1mb'));
 
 // Baseline security headers on every response.
 app.use((req, res, next) => {
@@ -24,6 +29,28 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
   res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+  // Content-Security-Policy. The dashboard still uses inline scripts/handlers,
+  // so 'unsafe-inline' is required for now - this is therefore a containment
+  // measure, not a complete XSS defence: it blocks script loading from any
+  // origin we do not use, stops <object>/<embed>, blocks <base> hijacking and
+  // restricts who may frame us. Set CSP_DISABLED=1 to turn it off quickly if a
+  // third party ever needs a new origin.
+  if (!process.env.CSP_DISABLED) {
+    res.setHeader('Content-Security-Policy', [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "object-src 'none'",
+      "frame-ancestors 'self'",
+      "form-action 'self'",
+      "img-src 'self' data: blob: https:",
+      "media-src 'self' blob: https:",
+      "font-src 'self' data:",
+      "style-src 'self' 'unsafe-inline'",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://sdk.cashfree.com https://unpkg.com",
+      "connect-src 'self' https://backend.omnidim.io https://sdk.cashfree.com https://api.cashfree.com https://sandbox.cashfree.com wss:",
+      "frame-src 'self' https://sdk.cashfree.com https://payments.cashfree.com https://payments-test.cashfree.com",
+    ].join('; '));
+  }
   res.removeHeader('X-Powered-By');
   next();
 });
@@ -70,7 +97,14 @@ const KEY = process.env.OMNIDIM_API_KEY;
 const BRAND = process.env.BRAND_NAME || 'MNB Omni Caller';
 const PORT = process.env.PORT || 3000;
 
-if (!KEY) { console.error('Missing OMNIDIM_API_KEY'); if (!process.env.VERCEL) process.exit(1); }
+// Treat template placeholders as "not configured". provision.sh writes
+// REPLACE_ME values; without this the server would happily boot with a known
+// admin password and a dead API key.
+const isPlaceholder = (v) => /^(REPLACE_ME|CHANGEME|CHANGE_ME|your[-_ ]?key|your[-_ ]?password|xxx+)$/i.test(String(v || '').trim());
+const fatal = (msg) => { console.error(msg); if (!process.env.VERCEL) process.exit(1); };
+if (!KEY || isPlaceholder(KEY)) fatal('OMNIDIM_API_KEY is missing or still a placeholder - refusing to start.');
+if (isPlaceholder(process.env.ADMIN_PASSWORD)) fatal('ADMIN_PASSWORD is still a placeholder - set a real password before starting.');
+if (isPlaceholder(process.env.DASHBOARD_PASSWORD)) fatal('DASHBOARD_PASSWORD is still a placeholder - set a real password before starting.');
 
 /* ================= Auth ================= */
 function getToken(req) {
@@ -85,28 +119,35 @@ function currentUser(req) {
 // Instant alert to the admin when a new organization requests access.
 // Set NTFY_TOPIC to a private topic name; install the free "ntfy" app and
 // subscribe to the same topic to get push notifications on your phone.
+// PRIVACY: ntfy.sh topics are PUBLIC - anyone who guesses the topic name
+// receives every message on it - and CallMeBot takes its payload in a URL query
+// string (logged by proxies and their server). Neither is a safe place for a
+// lead's name, phone, email or notes. These alerts therefore carry NO personal
+// data: they are a "something arrived, go look" ping only. The full lead detail
+// goes to the admin by Resend email, which is private and authenticated.
+function leadAlertText(u) {
+  const org = String(u && u.org ? u.org : '').trim();
+  const initial = org ? org.charAt(0).toUpperCase() + '***' : 'a new organization';
+  return `New signup from ${initial}. Open the admin dashboard for the details.`;
+}
 async function notifyNewLead(u) {
+  const body = leadAlertText(u);
   const topic = process.env.NTFY_TOPIC;
-  if (!topic) return;
-  const body = [
-    `Org: ${u.org}`,
-    u.contact ? `Name: ${u.contact}` : '',
-    u.phone ? `Phone: ${u.phone}` : '',
-    `Email: ${u.email}`,
-    u.note ? `Wants: ${u.note}` : '',
-  ].filter(Boolean).join('\n');
-  try {
-    const headers = { Title: 'New MNB Omni Caller lead', Priority: 'high', Tags: 'telephone_receiver,rotating_light' };
-    if (u.phone) headers.Actions = `view, WhatsApp this lead, https://wa.me/${u.phone.replace(/[^\d]/g, '')}`;
-    await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, { method: 'POST', headers, body });
-  } catch (e) { console.error('Lead alert failed:', e.message); }
-  // Optional WhatsApp alert via CallMeBot (set CALLMEBOT_APIKEY + CALLMEBOT_PHONE)
+  if (topic) {
+    try {
+      await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, {
+        method: 'POST',
+        headers: { Title: 'New MNB Omni Caller signup', Priority: 'high', Tags: 'telephone_receiver' },
+        body,
+      });
+    } catch (e) { console.error('Lead alert failed:', e.message); }
+  }
+  // Optional WhatsApp ping via CallMeBot (set CALLMEBOT_APIKEY + CALLMEBOT_PHONE).
   const cbKey = process.env.CALLMEBOT_APIKEY;
   const cbPhone = process.env.CALLMEBOT_PHONE;
   if (cbKey && cbPhone) {
     try {
-      const text = encodeURIComponent('New MNB Omni Caller lead\n' + body);
-      await fetch(`https://api.callmebot.com/whatsapp.php?phone=${cbPhone}&text=${text}&apikey=${cbKey}`);
+      await fetch(`https://api.callmebot.com/whatsapp.php?phone=${encodeURIComponent(cbPhone)}&text=${encodeURIComponent(body)}&apikey=${encodeURIComponent(cbKey)}`);
     } catch (e) { console.error('WhatsApp alert failed:', e.message); }
   }
 }
@@ -124,7 +165,10 @@ const MAIL_FROM = process.env.RESEND_FROM || 'MNB Omni Caller <hello@updates.mnb
 const MAIL_ADMIN = process.env.RESEND_ADMIN_EMAIL || 'mnbgotyou@gmail.com';
 const MAIL_REPLY_TO = process.env.RESEND_REPLY_TO || 'mnbgotyou@gmail.com';
 const APP_NAME = 'MNB Omni Caller';
-const DEMO_URL = process.env.APP_PUBLIC_URL || 'https://mnb-omni-caller.onrender.com/';
+// Single canonical host. Never fall back to a secondary deploy (the old Render
+// mirror) - a second live copy means two sets of sessions, two caches and
+// payment webhooks that can land on whichever box the provider chose.
+const DEMO_URL = process.env.APP_PUBLIC_URL || 'https://omni.mnbresearch.com/';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const eesc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -902,6 +946,51 @@ async function requireMinutes(req, res, next) {
   } catch (e) { next(); }
 }
 
+// Do-Not-Call: compare on digits only so +91 98xxx, 098xxx and 98xxx all match
+// the same person. Returns true when this account has blocked that number.
+function isBlocked(userId, number) {
+  const d = String(number || '').replace(/\D/g, '');
+  if (!d) return false;
+  const tail = d.slice(-10); // Indian subscriber number, ignoring country/trunk prefix
+  const list = (db.getUserData(userId) || {}).blocklist || [];
+  return list.some((b) => {
+    const bd = String(b || '').replace(/\D/g, '');
+    return bd && (bd === d || (bd.length >= 10 && tail && bd.slice(-10) === tail));
+  });
+}
+
+// A bulk campaign can burn the whole pooled OmniDim wallet in one shot, so the
+// SIZE of the campaign is checked against the remaining balance - not just
+// "are you above the block threshold". Budget at least one minute per contact.
+const CAMPAIGN_MIN_PER_CALL = Number(process.env.CAMPAIGN_MIN_PER_CALL || 1);
+function countCampaignContacts(body) {
+  const b = body || {};
+  for (const k of ['contacts', 'contact_list', 'numbers', 'records', 'rows', 'data']) {
+    if (Array.isArray(b[k])) return b[k].length;
+  }
+  const n = Number(b.contact_count || b.total_contacts || 0);
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+async function requireBulkMinutes(req, res, next) {
+  try {
+    if (isAdmin(req)) return next();
+    const cap = Number(req.user.minuteCap) || 0;
+    const used = await getUsageMinutes(req.user).catch(() => 0);
+    const st = reloadState(cap, used);
+    const contacts = countCampaignContacts(req.body);
+    const needed = Math.max(1, contacts * CAMPAIGN_MIN_PER_CALL);
+    if (st.remaining < needed) {
+      return res.status(403).json({
+        reloadRequired: true,
+        needed,
+        remaining: st.remaining,
+        error: `This campaign needs about ${needed} minute(s) for ${contacts} contact(s) but only ${st.remaining} remain. Please reload from the Billing tab.`,
+      });
+    }
+    next();
+  } catch (e) { next(); }
+}
+
 // Low-balance alert for YOUR pooled OmniDim account. Opt-in: set the total
 // minutes you have pre-funded in OMNIDIM_MINUTES_BUDGET. When aggregate client
 // usage crosses 80% / 95%, the admin is emailed once per threshold.
@@ -1062,6 +1151,13 @@ app.delete('/api/agents/:id', async (req, res) => {
 app.post('/api/calls/dispatch', async (req, res) => {
   const agentId = Number((req.body || {}).agent_id);
   if (!ownsAgent(req, agentId)) return res.status(403).json({ error: 'This agent is not assigned to your organization' });
+  // Do-not-call is enforced on the SERVER. A browser-only blocklist can be
+  // bypassed by clearing localStorage or calling the API directly, which would
+  // dial a number the customer asked never to be called again.
+  const target = (req.body || {}).to_number || (req.body || {}).phone_number || (req.body || {}).to;
+  if (isBlocked(req.user.id, target)) {
+    return res.status(403).json({ error: 'That number is on your Do-Not-Call list and cannot be dialled.' });
+  }
   if (!isAdmin(req)) {
     const cap = Number(req.user.minuteCap) || 0;
     const used = await getUsageMinutes(req.user).catch(() => 0);
@@ -1124,7 +1220,7 @@ async function campaignGuard(req, res, next) {
     next();
   } catch (e) { res.status(502).json({ error: 'Upstream request failed' }); }
 }
-app.post('/api/campaigns', requireMinutes, (req, res, next) => {
+app.post('/api/campaigns', requireMinutes, requireBulkMinutes, (req, res, next) => {
   if (!isAdmin(req)) {
     const numId = Number((req.body || {}).phone_number_id);
     if (!req.user.numberIds.includes(numId)) return res.status(403).json({ error: 'This phone number is not assigned to your organization' });
@@ -1134,7 +1230,18 @@ app.post('/api/campaigns', requireMinutes, (req, res, next) => {
 app.get('/api/campaigns/:id', campaignGuard, relay('GET', (r) => `/calls/bulk_call/${r.params.id}`));
 app.put('/api/campaigns/:id', campaignGuard, relay('PUT', (r) => `/calls/bulk_call/${r.params.id}`));
 app.delete('/api/campaigns/:id', campaignGuard, relay('DELETE', (r) => `/calls/bulk_call/${r.params.id}`));
-app.post('/api/campaigns/:id/contact', campaignGuard, requireMinutes, relay('POST', (r) => `/calls/bulk_call/${r.params.id}/add_contact`));
+app.post('/api/campaigns/:id/contact', campaignGuard, requireMinutes, requireBulkMinutes, (req, res, next) => {
+  // Same Do-Not-Call rule as single dials: a blocked number must not be added
+  // to a bulk campaign either, or the blocklist is trivially sidestepped.
+  const b = req.body || {};
+  const list = [b.contacts, b.contact_list, b.numbers, b.records, b.rows, b.data].find(Array.isArray) || [];
+  const candidates = list.length
+    ? list.map((c) => (c && typeof c === 'object' ? (c.phone_number || c.number || c.to_number || c.phone) : c))
+    : [b.phone_number || b.number || b.to_number || b.phone];
+  const hit = candidates.find((n) => isBlocked(req.user.id, n));
+  if (hit) return res.status(403).json({ error: `${hit} is on your Do-Not-Call list and cannot be added to a campaign.` });
+  next();
+}, relay('POST', (r) => `/calls/bulk_call/${r.params.id}/add_contact`));
 app.get('/api/campaigns/:id/live', campaignGuard, relay('GET', (r) => `/bulk-call/${r.params.id}/live-status`));
 
 /* ================= Knowledge base (per-tenant ownership) ================= */
@@ -1331,7 +1438,7 @@ app.post('/api/admin/numbers/purchase', adminOnly, async (req, res) => {
     });
     const data = await resp.json().catch(() => ({}));
     res.status(resp.status).json(data);
-  } catch (e) { res.status(502).json({ error: 'Could not complete the purchase. Please try again.', detail: String(e.message || e) }); }
+  } catch (e) { res.status(502).json({ error: 'Could not complete the purchase. Please try again.' }); }
 });
 app.post('/api/admin/numbers/release', adminOnly, relay('POST', '/phone_number/release'));
 app.get('/api/voices', relay('GET', '/providers/voices', { passQuery: true }));
@@ -1377,7 +1484,7 @@ app.post('/api/sessions', requireMinutes, async (req, res) => {
     const { status, data } = await omni('POST', '/sessions/create', { body });
     if (status >= 200 && status < 300) invalidateUsage(req.user.id);
     res.status(status).json(data);
-  } catch (e) { res.status(502).json({ error: 'Could not start web session', detail: String(e.message || e) }); }
+  } catch (e) { res.status(502).json({ error: 'Could not start web session' }); }
 });
 
 /* ---- (1b) Embeddable widgets: put "talk to your agent" on your own site ---- */
@@ -1828,14 +1935,19 @@ app.post('/api/admin/org/:id/vertical', adminOnly, (req, res) => {
 
 app.get('/api/analytics/call/:id', async (req, res) => {
   try {
-    const cached = analysisCache.get(String(req.params.id));
+    // Tenant isolation: the cache key is scoped to the requesting account, so a
+    // cached summary can only ever be served back to the account that already
+    // passed fetchLog()'s ownership check. Never key the cache on call id alone
+    // or one client could read another client's AI summary by guessing an id.
+    const cacheKey = req.user.id + ':' + String(req.params.id);
+    const cached = analysisCache.get(cacheKey);
     if (cached && Date.now() - cached.at < 3600000) return res.json({ analysis: cached.analysis, cached: true });
     const log = await fetchLog(req, req.params.id);
     if (!log) return res.status(404).json({ error: 'Call not found' });
     const analysis = await analyzeCall(log, verticalOf(req.user));
-    analysisCache.set(String(req.params.id), { at: Date.now(), analysis });
+    analysisCache.set(cacheKey, { at: Date.now(), analysis });
     res.json({ analysis });
-  } catch (e) { res.status(502).json({ error: 'Analysis failed', detail: String(e.message || e) }); }
+  } catch (e) { res.status(502).json({ error: 'Analysis failed' }); }
 });
 
 app.get('/api/analytics/overview', async (req, res) => {
@@ -1869,7 +1981,7 @@ app.get('/api/analytics/overview', async (req, res) => {
       topIntents: Object.entries(intents).sort((a, b) => b[1] - a[1]).slice(0, 6),
       aiEngine: aiProvider() === 'none' ? 'heuristic' : aiProvider(),
     });
-  } catch (e) { res.status(502).json({ error: 'Overview failed', detail: String(e.message || e) }); }
+  } catch (e) { res.status(502).json({ error: 'Overview failed' }); }
 });
 
 /* ---------------- Live calls (near-real-time via polling) ------------- */
@@ -2069,10 +2181,24 @@ app.post('/api/admin/integrations/test/:name', adminOnly, async (req, res) => {
     if (name === 'calendar') { const c = cfg('calendar'); return res.json(await postJson(c.webhookUrl, { event: 'test', title: 'MNB Omni Caller test event' })); }
     if (name === 'razorpay') return res.json(await razorpayOrder(100, 'mnb_test_' + Date.now()));
     return res.status(400).json({ error: 'Unknown integration' });
-  } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
+  } catch (e) { res.status(500).json({ ok: false, error: 'Request failed' }); }
 });
 
 /* ================= CRM sync (contacts + follow-ups, per user) ========= */
+/* ---------- Do-Not-Call list (server-side, enforced on dial) ---------- */
+app.get('/api/blocklist', (req, res) => {
+  const d = db.getUserData(req.user.id);
+  res.json({ blocked: Array.isArray(d.blocklist) ? d.blocklist : [] });
+});
+app.put('/api/blocklist', async (req, res) => {
+  const list = (req.body || {}).blocked;
+  if (!Array.isArray(list)) return res.status(400).json({ error: 'Send { blocked: [numbers] }' });
+  const clean = list.map((n) => String(n || '').trim()).filter(Boolean).slice(0, 5000);
+  db.setUserBucket(req.user.id, 'blocklist', clean);
+  await db.flush().catch(() => {});
+  res.json({ ok: true, count: clean.length });
+});
+
 app.get('/api/crm', (req, res) => {
   const d = db.getUserData(req.user.id);
   res.json({ contacts: d.contacts || [], followups: d.followups || {} });
@@ -2099,12 +2225,25 @@ app.post('/api/calls/:id/whatsapp-summary', async (req, res) => {
       (a.coaching && a.coaching.length) ? ('Next step: ' + a.coaching[0]) : '',
     ].filter(Boolean);
     const text = lines.join('\n');
-    const to = (req.body || {}).to || log.to_number;
+    // Abuse guard: the summary may ONLY go to the number that was actually on
+    // this call. Taking the recipient from the request body would let any
+    // signed-in client send arbitrary WhatsApp messages from the business
+    // number (spam/phishing from a trusted sender, and a fast way to get the
+    // WhatsApp Business account banned). Admins may override for support.
+    const requested = String(((req.body || {}).to) || '').trim();
+    const callNumber = String(log.to_number || '').trim();
+    const digits = (v) => String(v || '').replace(/\D/g, '');
+    let to = callNumber;
+    if (requested && isAdmin(req)) to = requested;
+    else if (requested && digits(requested) !== digits(callNumber)) {
+      return res.status(403).json({ error: 'The summary can only be sent to the number that was on this call.' });
+    }
+    if (!to) return res.status(400).json({ error: 'This call has no destination number to send the summary to.' });
     const r = await sendWhatsApp(to, text);
     if (r.skipped) return res.status(400).json({ error: 'WhatsApp is not configured. Add it in Integrations first.', summary: text });
     if (!r.ok) return res.status(502).json({ error: r.error || 'WhatsApp send failed', summary: text });
     res.json({ ok: true, summary: text, to: to });
-  } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+  } catch (e) { res.status(500).json({ error: 'Could not send the WhatsApp summary.' }); }
 });
 
 /* ================= Static frontend ================= */
