@@ -326,6 +326,7 @@ app.post('/api/auth/signup', rateLimit(5, 3600), async (req, res) => {
   // so await the shared-store write before replying or the new user + session
   // would not exist on the next request (which may hit another instance).
   await db.flush().catch(() => {});
+  db.trackEvent('auth.signup', { userId: user.id, props: { org: !!user.org } });
   notifyNewLead(user);            // fire-and-forget push alert (ntfy)
   sendAccessRequestEmails(user);  // fire-and-forget Resend emails (admin + welcome)
   onNewLead(user);                // fire-and-forget integration fan-out (Sheets/webhook/Slack/WhatsApp)
@@ -431,6 +432,7 @@ function creditOrderOnce(order) {
   });
   order.credited = true;
   order.status = 'PAID';
+  db.trackEvent('payment.succeeded', { userId: order.userId, props: { amount: order.amount, currency: order.currency, minutes: addMin } });
   order.creditedAt = new Date().toISOString();
   db.saveOrder(order);
   try {
@@ -528,6 +530,7 @@ app.post('/api/pay/create-order', rateLimit(20, 3600), async (req, res) => {
       return res.status(502).json({ error: (data && data.message) || 'Could not start the payment. Please try again.' });
     }
     db.saveOrder({ orderId, userId: user.id, amount, currency: cur, minutes, rate, status: 'CREATED', credited: false, createdAt: new Date().toISOString() });
+    db.trackEvent('checkout.started', { userId: user.id, props: { amount, currency: cur, minutes } });
     await db.flush().catch(() => {}); // order must be durable so the webhook (another instance) can find + credit it
     res.json({ ok: true, order_id: orderId, payment_session_id: data.payment_session_id, mode: CF_ENV });
   } catch (e) {
@@ -591,6 +594,7 @@ app.post('/api/auth/login', rateLimit(20, 900), async (req, res) => {
   if (user.status !== 'active') return res.status(403).json({ error: 'Your access has been revoked' });
   const token = db.createSession(user.id);
   await db.flush().catch(() => {}); // durable write before responding (serverless-safe)
+  db.trackEvent('auth.login', { userId: user.id, props: {} });
   res.setHeader('Set-Cookie', sessionCookie(token, 1209600));
   res.json({ ok: true });
 });
@@ -750,6 +754,220 @@ const WIDGET_LOADER_JS = [
   '  });',
   '})();'
 ].join('\n');
+
+/* =======================================================================
+ * PUBLIC VERSIONED API  -  /api/v1
+ *
+ * Authenticated by customer API key (not the dashboard session cookie), so it
+ * is mounted BEFORE the cookie gate below. Every route is scoped to the key
+ * owner's own agents/data and gated on an explicit scope. The router ends in
+ * its own 404 so a bad v1 path never falls through to the cookie gate.
+ *
+ * Keys are accepted in a header only - never in the query string, which would
+ * leak the secret into access logs, proxies and browser history.
+ * ===================================================================== */
+// Whitelabel guard: never let the upstream provider's name reach a customer
+// through our own API responses.
+const scrub = (v) => String(v == null ? '' : v).replace(/omni\s?dimension|omnidim/gi, BRAND);
+
+// Per-key rate limit for the public API (declared before use by apiKeyAuth).
+const API_RATE_MAX = Number(process.env.API_RATE_MAX || 120);
+const API_RATE_WINDOW = Number(process.env.API_RATE_WINDOW || 60);
+
+const v1 = express.Router();
+
+function apiErr(res, status, code, message, extra) {
+  return res.status(status).json({ error: Object.assign({ code, message }, extra || {}) });
+}
+
+async function apiKeyAuth(req, res, next) {
+  const hdr = String(req.get('authorization') || '');
+  const presented = hdr.toLowerCase().startsWith('bearer ')
+    ? hdr.slice(7).trim()
+    : String(req.get('x-api-key') || '').trim();
+  // Check this BEFORE "missing credentials": someone who put the key in the URL
+  // did supply one, and needs to be told where it belongs rather than that it
+  // is absent. (Keys in query strings leak into access logs and proxies.)
+  if (req.query.api_key || req.query.key) {
+    return apiErr(res, 400, 'key_in_query', 'API keys must be sent in a header ("Authorization: Bearer ..." or "X-API-Key"), never in the query string.');
+  }
+  if (!presented) {
+    return apiErr(res, 401, 'missing_credentials', 'Provide your key as "Authorization: Bearer mnb_sk_..." or an X-API-Key header.');
+  }
+  const rec = db.verifyApiKey(presented);
+  if (!rec) return apiErr(res, 401, 'invalid_key', 'That API key is invalid, expired or revoked.');
+  const owner = db.findUserById(rec.userId);
+  if (!owner || owner.status !== 'active') return apiErr(res, 403, 'account_inactive', 'The account that owns this key is not active.');
+
+  // Per-key rate limit (separate from the per-IP limiter on public forms).
+  const ok = await db.rateHit('apikey:' + rec.id, API_RATE_MAX, API_RATE_WINDOW);
+  if (!ok) {
+    res.setHeader('Retry-After', String(API_RATE_WINDOW));
+    return apiErr(res, 429, 'rate_limited', `Rate limit exceeded: ${API_RATE_MAX} requests per ${API_RATE_WINDOW}s for this key.`);
+  }
+  req.apiKey = rec;
+  req.user = owner;          // lets existing ownership helpers work unchanged
+  db.touchApiKey(rec.id);
+  next();
+}
+function requireScope(scope) {
+  return (req, res, next) => {
+    if (!req.apiKey || !req.apiKey.scopes.includes(scope)) {
+      return apiErr(res, 403, 'insufficient_scope', `This key is missing the "${scope}" scope.`, { required: scope, granted: (req.apiKey && req.apiKey.scopes) || [] });
+    }
+    next();
+  };
+}
+
+function pageParams(req) {
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const size = Math.min(100, Math.max(1, Number(req.query.page_size) || 25));
+  return { page, size };
+}
+
+v1.use(express.json({ limit: '256kb' }));
+v1.use(apiKeyAuth);
+
+// Identity / health - any valid key, no scope needed.
+v1.get('/ping', (req, res) => res.json({
+  ok: true, product: 'MNB Omni Caller', version: 'v1',
+  key: { id: req.apiKey.id, name: req.apiKey.name, scopes: req.apiKey.scopes },
+  org: req.user.org || null,
+  server_time: new Date().toISOString(),
+}));
+
+// Agents assigned to this account.
+v1.get('/agents', requireScope('agents:read'), async (req, res) => {
+  try {
+    const { data } = await omni('GET', '/agents');
+    const all = data.bots || data.agents || [];
+    const mine = isAdmin(req) ? all : all.filter((a) => req.user.agentIds.includes(Number(a.id)));
+    const { page, size } = pageParams(req);
+    res.json({
+      data: mine.slice((page - 1) * size, page * size).map((a) => ({
+        id: a.id, name: scrub(a.name), voice: a.voice_name || null, model: a.llm_service || null, languages: a.language || null,
+      })),
+      pagination: { page, page_size: size, total: mine.length },
+    });
+  } catch (e) { apiErr(res, 502, 'upstream_error', 'Could not load agents right now.'); }
+});
+
+// Call history, scoped to this account's agents.
+v1.get('/calls', requireScope('calls:read'), async (req, res) => {
+  try {
+    const { page, size } = pageParams(req);
+    const rows = await recentLogs(req, 100);
+    const slice = rows.slice((page - 1) * size, page * size);
+    res.json({
+      data: slice.map((l) => ({
+        id: l.id, agent: scrub(l.bot_name), to: l.to_number, from: l.from_number,
+        direction: l.call_direction, status: l.call_status, duration: l.call_duration,
+        sentiment: l.sentiment_score || null, started_at: l.time_of_call,
+      })),
+      pagination: { page, page_size: size, total: rows.length },
+    });
+  } catch (e) { apiErr(res, 502, 'upstream_error', 'Could not load calls right now.'); }
+});
+
+v1.get('/calls/:id', requireScope('calls:read'), async (req, res) => {
+  try {
+    const log = await fetchLog(req, req.params.id); // enforces tenant ownership
+    if (!log) return apiErr(res, 404, 'not_found', 'No call with that id on your account.');
+    res.json({ data: { id: log.id, agent: scrub(log.bot_name), to: log.to_number, status: log.call_status, duration: log.call_duration, sentiment: log.sentiment_score || null, started_at: log.time_of_call, transcript: log.conversation || null } });
+  } catch (e) { apiErr(res, 502, 'upstream_error', 'Could not load that call.'); }
+});
+
+// Place a call. Honours the same minute balance and Do-Not-Call rules as the UI.
+v1.post('/calls', requireScope('calls:write'), async (req, res) => {
+  const b = req.body || {};
+  const agentId = Number(b.agent_id);
+  const to = String(b.to_number || '').trim();
+  if (!agentId || !to) return apiErr(res, 400, 'invalid_request', 'agent_id and to_number are required.');
+  if (!/^\+?[\d\s()-]{6,20}$/.test(to)) return apiErr(res, 400, 'invalid_number', 'to_number must be a phone number including country code.');
+  if (!ownsAgent(req, agentId)) return apiErr(res, 403, 'forbidden', 'That agent is not assigned to your account.');
+  if (isBlocked(req.user.id, to)) return apiErr(res, 403, 'do_not_call', 'That number is on your Do-Not-Call list.');
+  if (!isAdmin(req)) {
+    const cap = Number(req.user.minuteCap) || 0;
+    const used = await getUsageMinutes(req.user).catch(() => 0);
+    const st = reloadState(cap, used);
+    if (st.blocked) return apiErr(res, 402, 'insufficient_minutes', 'Not enough calling minutes. Reload from the dashboard.', { remaining: st.remaining });
+  }
+  try {
+    const { status, data } = await omni('POST', '/calls/dispatch', { body: { agent_id: agentId, to_number: to, call_context: b.context || undefined } });
+    invalidateUsage(req.user.id);
+    db.trackEvent('api.call_dispatched', { userId: req.user.id, props: { keyId: req.apiKey.id, agentId } });
+    if (status >= 400) return apiErr(res, 502, 'dispatch_failed', 'The call could not be placed.');
+    res.status(202).json({ data: { accepted: true, request_id: data.requestId || data.request_id || null } });
+  } catch (e) { apiErr(res, 502, 'upstream_error', 'The call could not be placed.'); }
+});
+
+v1.get('/contacts', requireScope('contacts:read'), (req, res) => {
+  const d = db.getUserData(req.user.id);
+  const all = Array.isArray(d.contacts) ? d.contacts : [];
+  const { page, size } = pageParams(req);
+  res.json({ data: all.slice((page - 1) * size, page * size), pagination: { page, page_size: size, total: all.length } });
+});
+
+v1.put('/contacts', requireScope('contacts:write'), async (req, res) => {
+  const list = (req.body || {}).contacts;
+  if (!Array.isArray(list)) return apiErr(res, 400, 'invalid_request', 'Send { "contacts": [...] }.');
+  db.setUserBucket(req.user.id, 'contacts', list.slice(0, 2000));
+  await db.flush().catch(() => {});
+  res.json({ data: { saved: Math.min(list.length, 2000) } });
+});
+
+v1.get('/analytics/summary', requireScope('analytics:read'), async (req, res) => {
+  try {
+    const rows = await recentLogs(req, 100);
+    const done = rows.filter((l) => String(l.call_status || '').toLowerCase() === 'completed');
+    const pos = rows.filter((l) => /positive/i.test(l.sentiment_score || '')).length;
+    res.json({ data: { calls: rows.length, connected: done.length, connect_rate_pct: rows.length ? Math.round(done.length / rows.length * 100) : 0, positive: pos } });
+  } catch (e) { apiErr(res, 502, 'upstream_error', 'Could not build the summary.'); }
+});
+
+v1.use((req, res) => apiErr(res, 404, 'unknown_endpoint', `No such v1 endpoint: ${req.method} ${req.path}. See /api/v1-openapi.json`));
+
+app.use('/api/v1', v1);
+
+// OpenAPI document (public - describes the surface, grants nothing).
+app.get('/api/v1-openapi.json', (req, res) => {
+  const base = (process.env.APP_PUBLIC_URL || 'https://omni.mnbresearch.com').replace(/\/+$/, '');
+  const scopeList = db.ALL_SCOPES;
+  const page = [
+    { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
+    { name: 'page_size', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 25 } },
+  ];
+  res.json({
+    openapi: '3.0.3',
+    info: { title: 'MNB Omni Caller API', version: '1.0.0', description: 'Authenticated with a customer API key. Send it as "Authorization: Bearer mnb_sk_..." or "X-API-Key". Keys are never accepted in the query string. Scopes: ' + scopeList.join(', ') },
+    servers: [{ url: base + '/api/v1' }],
+    components: {
+      securitySchemes: {
+        bearerAuth: { type: 'http', scheme: 'bearer' },
+        apiKeyHeader: { type: 'apiKey', in: 'header', name: 'X-API-Key' },
+      },
+      schemas: {
+        Error: { type: 'object', properties: { error: { type: 'object', properties: { code: { type: 'string' }, message: { type: 'string' } } } } },
+        Pagination: { type: 'object', properties: { page: { type: 'integer' }, page_size: { type: 'integer' }, total: { type: 'integer' } } },
+      },
+    },
+    security: [{ bearerAuth: [] }, { apiKeyHeader: [] }],
+    paths: {
+      '/ping': { get: { summary: 'Verify a key and see its scopes', responses: { 200: { description: 'OK' }, 401: { description: 'Invalid key' } } } },
+      '/agents': { get: { summary: 'List agents on your account', parameters: page, responses: { 200: { description: 'OK' }, 403: { description: 'Missing agents:read' } } } },
+      '/calls': {
+        get: { summary: 'List recent calls', parameters: page, responses: { 200: { description: 'OK' }, 403: { description: 'Missing calls:read' } } },
+        post: { summary: 'Place an outbound call', responses: { 202: { description: 'Accepted' }, 402: { description: 'Out of minutes' }, 403: { description: 'Do-Not-Call or missing calls:write' } } },
+      },
+      '/calls/{id}': { get: { summary: 'Fetch one call with transcript', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: { description: 'OK' }, 404: { description: 'Not on your account' } } } },
+      '/contacts': {
+        get: { summary: 'List saved contacts', parameters: page, responses: { 200: { description: 'OK' } } },
+        put: { summary: 'Replace saved contacts', responses: { 200: { description: 'OK' } } },
+      },
+      '/analytics/summary': { get: { summary: 'Call volume and connect rate', responses: { 200: { description: 'OK' } } } },
+    },
+  });
+});
 
 app.use('/api', (req, res, next) => {
   if (req.path.startsWith('/auth/') || req.path === '/me') return next();
@@ -1121,6 +1339,7 @@ app.post('/api/agents', async (req, res) => {
         const ids = Array.from(new Set([...(req.user.agentIds || []), Number(newId)]));
         db.updateUser(req.user.id, { agentIds: ids });
         req.user.agentIds = ids;
+        db.trackEvent('agent.created', { userId: req.user.id, props: {} }); // activation milestone
       }
       if (newId && !data.id) data.id = Number(newId);
     }
@@ -2185,6 +2404,97 @@ app.post('/api/admin/integrations/test/:name', adminOnly, async (req, res) => {
 });
 
 /* ================= CRM sync (contacts + follow-ups, per user) ========= */
+/* =======================================================================
+ * API-key management (dashboard, session-authenticated)
+ * The plaintext secret is returned exactly once, by create and rotate.
+ * ===================================================================== */
+app.get('/api/keys', (req, res) => {
+  res.json({ keys: db.listApiKeys(req.user.id), scopes: db.ALL_SCOPES, rateLimit: { max: API_RATE_MAX, windowSec: API_RATE_WINDOW } });
+});
+
+app.post('/api/keys', async (req, res) => {
+  const b = req.body || {};
+  const mine = db.listApiKeys(req.user.id).filter((k) => k.status === 'active');
+  if (mine.length >= 20) return res.status(400).json({ error: 'You already have 20 active keys. Revoke one first.' });
+  const scopes = Array.isArray(b.scopes) ? b.scopes.filter((s) => db.ALL_SCOPES.includes(s)) : [];
+  if (!scopes.length) return res.status(400).json({ error: 'Pick at least one scope: ' + db.ALL_SCOPES.join(', ') });
+  const days = b.expiresInDays === null || b.expiresInDays === undefined || b.expiresInDays === '' ? null : Number(b.expiresInDays);
+  if (days !== null && (!Number.isFinite(days) || days < 1 || days > 730)) return res.status(400).json({ error: 'expiresInDays must be between 1 and 730, or null for no expiry.' });
+  const out = db.createApiKey(req.user.id, { name: b.name, scopes, expiresInDays: days });
+  await db.flush().catch(() => {});
+  db.trackEvent('apikey.created', { userId: req.user.id, props: { scopes } });
+  // "secret" is shown once and never retrievable again.
+  res.status(201).json({ key: out.record, secret: out.secret, notice: 'Copy this key now - it will not be shown again.' });
+});
+
+app.post('/api/keys/:id/rotate', async (req, res) => {
+  const existing = db.getApiKey(req.params.id);
+  if (!existing || existing.userId !== req.user.id) return res.status(404).json({ error: 'Key not found on your account' });
+  const overlap = Number((req.body || {}).overlapMinutes || 0);
+  if (!Number.isFinite(overlap) || overlap < 0 || overlap > 1440) return res.status(400).json({ error: 'overlapMinutes must be between 0 and 1440.' });
+  const out = db.rotateApiKey(req.params.id, { overlapMinutes: overlap, byUserId: req.user.id });
+  if (!out) return res.status(409).json({ error: 'That key is not active and cannot be rotated.' });
+  await db.flush().catch(() => {});
+  res.json({ key: out.record, secret: out.secret, replaced: req.params.id, overlapMinutes: overlap, notice: 'Copy this key now - it will not be shown again.' });
+});
+
+app.delete('/api/keys/:id', async (req, res) => {
+  const existing = db.getApiKey(req.params.id);
+  if (!existing || existing.userId !== req.user.id) return res.status(404).json({ error: 'Key not found on your account' });
+  db.revokeApiKey(req.params.id, req.user.id);
+  await db.flush().catch(() => {});
+  res.json({ ok: true, revoked: req.params.id });
+});
+
+app.get('/api/keys/audit', (req, res) => res.json({ entries: db.listAudit(100, req.user.id) }));
+
+/* ---------- Product analytics (admin dashboard) ---------- */
+app.get('/api/analytics/product', adminOnly, (req, res) => {
+  const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));
+  const totals = db.eventTotals(days);
+  const n = (k) => totals[k] || 0;
+  const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+  const visits = n('landing.view');
+  const signups = n('auth.signup');
+  const activated = n('agent.created');
+  const checkout = n('checkout.started');
+  const paid = n('payment.succeeded');
+  res.json({
+    days,
+    totals,
+    daily: db.eventDaily(days),
+    funnel: [
+      { stage: 'Landing views', count: visits },
+      { stage: 'Signups', count: signups, convFromPrev: pct(signups, visits) },
+      { stage: 'Created an agent', count: activated, convFromPrev: pct(activated, signups) },
+      { stage: 'Started checkout', count: checkout, convFromPrev: pct(checkout, activated) },
+      { stage: 'Paid', count: paid, convFromPrev: pct(paid, checkout) },
+    ],
+    abandonedCheckouts: Math.max(0, checkout - paid),
+  });
+});
+
+// First-party landing beacon. No cookies, no third party, no PII.
+app.post('/api/track', rateLimit(240, 3600), (req, res) => {
+  const allowed = ['landing.view', 'pricing.view', 'demo.started'];
+  const name = String((req.body || {}).event || '');
+  if (!allowed.includes(name)) return res.status(400).json({ error: 'Unknown event' });
+  db.trackEvent(name, { props: {} });
+  res.json({ ok: true });
+});
+
+/* ---------- Backup export (admin) ----------
+ * The whole datastore is a single JSON blob in Redis with no provider-side
+ * backup, so an authenticated admin can pull a point-in-time snapshot. Password
+ * hashes, API-key hashes and session tokens are stripped from the export so the
+ * file cannot be replayed to impersonate an account. */
+app.get('/api/admin/backup', adminOnly, (req, res) => {
+  const snap = db.exportSnapshot();
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename="omni-caller-backup-${new Date().toISOString().slice(0, 10)}.json"`);
+  res.end(JSON.stringify(snap, null, 2));
+});
+
 /* ---------- Do-Not-Call list (server-side, enforced on dial) ---------- */
 app.get('/api/blocklist', (req, res) => {
   const d = db.getUserData(req.user.id);

@@ -14,7 +14,16 @@ const REDIS_KEY = 'mnb:omnicaller:db';
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
-let state = { users: [], sessions: {}, kbOwners: {}, settings: {}, userData: {}, orders: {}, resetTokens: {}, widgets: {} };
+let state = {
+  users: [], sessions: {}, kbOwners: {}, settings: {}, userData: {}, orders: {},
+  resetTokens: {}, widgets: {},
+  apiKeys: {},      // keyId -> {id, userId, name, hash, scopes, status, createdAt, expiresAt, lastUsedAt, rotatedFrom}
+  auditLog: [],     // capped ring: {at, userId, action, target, meta} - never contains secrets
+  events: [],       // capped ring of raw product-analytics events
+  eventDaily: {},   // 'YYYY-MM-DD' -> { eventName: count } (small, keeps history after ring rolls)
+};
+const EVENT_RING_MAX = 5000;   // the whole DB is one JSON blob, so raw events are bounded
+const AUDIT_RING_MAX = 2000;
 let redis = null;
 const memRL = new Map(); // in-memory rate-limit fallback when Redis is down
 
@@ -27,6 +36,10 @@ function normalize() {
   state.orders ||= {};
   state.resetTokens ||= {};
   state.widgets ||= {};
+  state.apiKeys ||= {};
+  state.auditLog ||= [];
+  state.events ||= [];
+  state.eventDaily ||= {};
 }
 
 /* ---------- persistence backend ---------- */
@@ -132,6 +145,16 @@ function updateUser(id, patch) {
 function deleteUser(id) {
   state.users = state.users.filter((u) => u.id !== id);
   for (const [tok, s] of Object.entries(state.sessions)) if (s.userId === id) delete state.sessions[tok];
+  // Clean up everything owned by this account. Leaving these behind orphaned
+  // the account's contacts, Do-Not-Call list, API keys and widgets - which both
+  // leaks personal data after a deletion request and lets a revoked tenant's
+  // key keep working.
+  for (const [kid, k] of Object.entries(state.apiKeys)) if (k.userId === id) delete state.apiKeys[kid];
+  for (const [wk, w] of Object.entries(state.widgets)) if (w && w.userId === id) delete state.widgets[wk];
+  for (const [fid, owner] of Object.entries(state.kbOwners)) if (owner === id) delete state.kbOwners[fid];
+  delete state.userData[id]; // contacts, follow-ups, reminders, blocklist
+  // Orders are retained (financial records) but no longer resolve to a person.
+  audit(null, 'user.delete', id, {});
   save();
 }
 function listUsers() { return state.users; }
@@ -293,8 +316,209 @@ async function rateHit(key, max, windowSec) {
   return e.count <= max;
 }
 
+/* =======================================================================
+ * API keys (customer-facing credentials for the public /api/v1 surface)
+ *
+ * Format: mnb_sk_<keyId>_<secret>
+ *   keyId  = 16 hex chars  -> lets us look the record up directly instead of
+ *            hashing against every stored key (no O(n) scan, no timing leak)
+ *   secret = 64 hex chars  = 256 bits of entropy from crypto.randomBytes(32)
+ *
+ * Only a SHA-256 hash of the secret is ever stored. The plaintext is returned
+ * exactly once, at creation (or rotation), and cannot be recovered afterwards.
+ * ===================================================================== */
+const API_KEY_PREFIX = 'mnb_sk_';
+const ALL_SCOPES = ['calls:read', 'calls:write', 'agents:read', 'contacts:read', 'contacts:write', 'analytics:read'];
+
+function sha256(s) { return crypto.createHash('sha256').update(String(s)).digest('hex'); }
+
+function parseApiKey(raw) {
+  const s = String(raw || '').trim();
+  if (!s.startsWith(API_KEY_PREFIX)) return null;
+  const rest = s.slice(API_KEY_PREFIX.length);
+  const i = rest.indexOf('_');
+  if (i < 1) return null;
+  const id = rest.slice(0, i);
+  const secret = rest.slice(i + 1);
+  if (!/^[a-f0-9]{16}$/.test(id) || !/^[a-f0-9]{64}$/.test(secret)) return null;
+  return { id, secret };
+}
+
+function createApiKey(userId, { name, scopes, expiresInDays } = {}) {
+  const id = crypto.randomBytes(8).toString('hex');
+  const secret = crypto.randomBytes(32).toString('hex'); // 256-bit
+  const wanted = Array.isArray(scopes) && scopes.length ? scopes : ['calls:read', 'agents:read'];
+  const rec = {
+    id,
+    userId,
+    name: String(name || 'API key').slice(0, 80),
+    hash: sha256(secret),
+    scopes: wanted.filter((s) => ALL_SCOPES.includes(s)),
+    status: 'active',
+    createdAt: new Date().toISOString(),
+    expiresAt: expiresInDays ? new Date(Date.now() + Number(expiresInDays) * 86400000).toISOString() : null,
+    lastUsedAt: null,
+    rotatedFrom: null,
+  };
+  state.apiKeys[id] = rec;
+  audit(userId, 'apikey.create', id, { scopes: rec.scopes, expiresAt: rec.expiresAt });
+  save();
+  return { record: publicApiKey(rec), secret: API_KEY_PREFIX + id + '_' + secret };
+}
+
+// Verify a presented key. Returns the record only when it is genuinely usable.
+function verifyApiKey(raw) {
+  const p = parseApiKey(raw);
+  if (!p) return null;
+  const rec = state.apiKeys[p.id];
+  if (!rec || rec.status !== 'active') return null;
+  if (rec.expiresAt && Date.parse(rec.expiresAt) < Date.now()) return null;
+  const a = Buffer.from(sha256(p.secret), 'hex');
+  const b = Buffer.from(String(rec.hash || ''), 'hex');
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  return rec;
+}
+
+function touchApiKey(id) {
+  const rec = state.apiKeys[id];
+  if (!rec) return;
+  rec.lastUsedAt = new Date().toISOString();
+  save(); // best-effort; flushed with the next write
+}
+
+function listApiKeys(userId) {
+  return Object.values(state.apiKeys)
+    .filter((k) => !userId || k.userId === userId)
+    .sort((x, y) => String(y.createdAt).localeCompare(String(x.createdAt)))
+    .map(publicApiKey);
+}
+function getApiKey(id) { const r = state.apiKeys[id]; return r ? publicApiKey(r) : null; }
+
+// Never leak the hash to any caller.
+function publicApiKey(r) {
+  return {
+    id: r.id, userId: r.userId, name: r.name, scopes: r.scopes, status: r.status,
+    createdAt: r.createdAt, expiresAt: r.expiresAt, lastUsedAt: r.lastUsedAt,
+    rotatedFrom: r.rotatedFrom || null,
+    masked: API_KEY_PREFIX + r.id + '_' + '*'.repeat(8),
+  };
+}
+
+function revokeApiKey(id, byUserId) {
+  const rec = state.apiKeys[id];
+  if (!rec) return false;
+  rec.status = 'revoked';
+  rec.revokedAt = new Date().toISOString();
+  audit(byUserId || rec.userId, 'apikey.revoke', id, {});
+  save();
+  return true;
+}
+
+// Rotation issues a NEW secret and optionally keeps the old key alive for a
+// short overlap window so a running integration is not broken mid-deploy.
+function rotateApiKey(id, { overlapMinutes = 0, byUserId } = {}) {
+  const old = state.apiKeys[id];
+  if (!old || old.status !== 'active') return null;
+  const next = createApiKey(old.userId, {
+    name: old.name,
+    scopes: old.scopes,
+    expiresInDays: old.expiresAt ? Math.max(1, Math.ceil((Date.parse(old.expiresAt) - Date.now()) / 86400000)) : null,
+  });
+  state.apiKeys[next.record.id].rotatedFrom = id;
+  // createApiKey already snapshotted the record, so refresh the copy we return
+  // or the caller/API response would report rotatedFrom: null.
+  next.record = publicApiKey(state.apiKeys[next.record.id]);
+  if (Number(overlapMinutes) > 0) {
+    old.status = 'active';
+    old.expiresAt = new Date(Date.now() + Number(overlapMinutes) * 60000).toISOString();
+    audit(byUserId || old.userId, 'apikey.rotate', id, { overlapMinutes: Number(overlapMinutes), replacedBy: next.record.id });
+  } else {
+    old.status = 'revoked';
+    old.revokedAt = new Date().toISOString();
+    audit(byUserId || old.userId, 'apikey.rotate', id, { overlapMinutes: 0, replacedBy: next.record.id });
+  }
+  save();
+  return next;
+}
+
+function deleteUserApiKeys(userId) {
+  for (const [id, k] of Object.entries(state.apiKeys)) if (k.userId === userId) delete state.apiKeys[id];
+  save();
+}
+
+/* ---------- audit log (never stores secret values) ---------- */
+function audit(userId, action, target, meta) {
+  state.auditLog.push({ at: new Date().toISOString(), userId: userId || null, action, target: target || null, meta: meta || {} });
+  if (state.auditLog.length > AUDIT_RING_MAX) state.auditLog.splice(0, state.auditLog.length - AUDIT_RING_MAX);
+}
+function listAudit(limit = 200, userId) {
+  const rows = userId ? state.auditLog.filter((r) => r.userId === userId) : state.auditLog;
+  return rows.slice(-Math.max(1, Math.min(2000, limit))).reverse();
+}
+
+/* =======================================================================
+ * Product analytics. Raw events are a bounded ring (the whole DB is one JSON
+ * blob), while small per-day counters keep the funnel history after the ring
+ * rolls over. Never record passwords, card data or tokens here.
+ * ===================================================================== */
+function trackEvent(name, { userId, props } = {}) {
+  const at = new Date();
+  const day = at.toISOString().slice(0, 10);
+  state.events.push({ at: at.toISOString(), name: String(name).slice(0, 60), userId: userId || null, props: props || {} });
+  if (state.events.length > EVENT_RING_MAX) state.events.splice(0, state.events.length - EVENT_RING_MAX);
+  state.eventDaily[day] ||= {};
+  state.eventDaily[day][name] = (state.eventDaily[day][name] || 0) + 1;
+  save();
+}
+function listEvents({ limit = 200, name, userId } = {}) {
+  let rows = state.events;
+  if (name) rows = rows.filter((e) => e.name === name);
+  if (userId) rows = rows.filter((e) => e.userId === userId);
+  return rows.slice(-Math.max(1, Math.min(2000, limit))).reverse();
+}
+function eventTotals(days = 30) {
+  const out = {}; const since = Date.now() - days * 86400000;
+  for (const [day, counts] of Object.entries(state.eventDaily)) {
+    if (Date.parse(day + 'T00:00:00Z') < since) continue;
+    for (const [n, c] of Object.entries(counts)) out[n] = (out[n] || 0) + c;
+  }
+  return out;
+}
+function eventDaily(days = 30) {
+  const since = Date.now() - days * 86400000;
+  return Object.fromEntries(Object.entries(state.eventDaily).filter(([d]) => Date.parse(d + 'T00:00:00Z') >= since).sort());
+}
+
+/* ---------- full-state export for backups (admin only, secrets stripped) --- */
+function exportSnapshot() {
+  return {
+    exportedAt: new Date().toISOString(),
+    counts: {
+      users: state.users.length, apiKeys: Object.keys(state.apiKeys).length,
+      orders: Object.keys(state.orders).length, widgets: Object.keys(state.widgets).length,
+      events: state.events.length,
+    },
+    // passHash / api-key hash / session tokens are deliberately omitted so a
+    // backup file cannot be replayed to impersonate anyone.
+    users: state.users.map((u) => ({ ...u, passHash: undefined })),
+    apiKeys: Object.values(state.apiKeys).map(publicApiKey),
+    orders: state.orders,
+    widgets: state.widgets,
+    userData: state.userData,
+    settings: state.settings,
+    eventDaily: state.eventDaily,
+    auditLog: state.auditLog,
+  };
+}
+
 module.exports = {
   init, flush, rateHit,
+  ALL_SCOPES,
+  createApiKey, verifyApiKey, touchApiKey, listApiKeys, getApiKey,
+  revokeApiKey, rotateApiKey, deleteUserApiKeys, parseApiKey,
+  audit, listAudit,
+  trackEvent, listEvents, eventTotals, eventDaily,
+  exportSnapshot,
   hashPassword, verifyPassword,
   findUserByEmail, findUserById, createUser, updateUser, deleteUser, listUsers,
   createSession, getSession, destroySession, destroyUserSessions,

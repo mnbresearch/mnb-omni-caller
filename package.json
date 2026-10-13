@@ -1,10 +1,13 @@
 {
   "name": "mnb-omni-caller",
   "version": "2.0.0",
-  "description": "MNB Omni Caller — Voice AI Agent Dashboard by MNB Research",
+  "description": "MNB Omni Caller \u2014 Voice AI Agent Dashboard by MNB Research",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test \"test/**/*.test.js\"",
+    "check": "node --check server.js && node --check db.js && node --check public/app.js",
+    "test:api": "node test/api-v1.boot.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
