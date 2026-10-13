@@ -4735,3 +4735,177 @@ async function detachNumber(numberId) {
 
   setTimeout(function () { if ((location.hash || '').indexOf('admin') > -1) inject(); }, 1600);
 })();
+
+/* =====================================================================
+ * v29 - Developer API: key management UI (create / rotate / revoke)
+ * Additive layer. Secrets are shown exactly once, right after they are
+ * issued, and are never re-fetchable from the server.
+ * ===================================================================== */
+(function () {
+  if (window.__mnbEnhanced29) return; window.__mnbEnhanced29 = true;
+  var T = function (m, ms) { try { toast(m, ms); } catch (e) {} };
+  var E = function (s) { try { return esc(s); } catch (e) { return String(s == null ? '' : s); } };
+  var el = function (id) { return document.getElementById(id); };
+  var SCOPE_HELP = {
+    'calls:read': 'Read call history and transcripts',
+    'calls:write': 'Place outbound calls',
+    'agents:read': 'List your agents',
+    'contacts:read': 'Read saved contacts',
+    'contacts:write': 'Replace saved contacts',
+    'analytics:read': 'Read call volume and connect rate'
+  };
+
+  var css = document.createElement('style');
+  css.textContent =
+    '.k-row{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;border:1px solid var(--border,#2b2b2f);border-radius:12px;padding:12px 14px;margin-bottom:8px;flex-wrap:wrap}' +
+    '.k-row code{font-size:12px;color:var(--muted,#97938c)}' +
+    '.k-pill{font-size:11px;border:1px solid var(--border,#2b2b2f);border-radius:20px;padding:2px 9px;margin-right:4px;display:inline-block}' +
+    '.k-pill.on{border-color:#43b97f;color:#43b97f}.k-pill.off{border-color:#e05d55;color:#e05d55}' +
+    '.k-secret{background:#0e0f12;border:1px solid #43b97f;border-radius:10px;padding:12px;margin:10px 0;word-break:break-all;font-family:ui-monospace,monospace;font-size:12.5px}' +
+    '.k-btn{border:1px solid var(--border,#2b2b2f);background:transparent;color:var(--text,#eee);border-radius:8px;padding:6px 11px;font-size:12px;cursor:pointer;font-weight:600;margin-left:6px;font-family:inherit}' +
+    '.k-btn.pri{background:var(--accent-grad,linear-gradient(135deg,#ff7a18,#ffab5e));color:#111;border:none}' +
+    '.k-btn.dan:hover{border-color:#e05d55;color:#e05d55}' +
+    '.k-scopes{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}' +
+    '.k-scopes label{font-size:12.5px;display:flex;gap:6px;align-items:center;border:1px solid var(--border,#2b2b2f);border-radius:8px;padding:6px 10px;cursor:pointer}';
+  document.head.appendChild(css);
+
+  var view = null;
+  function ensureView() {
+    if (view) return view;
+    var main = document.querySelector('main.main') || (el('view-overview') || {}).parentNode;
+    if (!main) return null;
+    view = document.createElement('section');
+    view.id = 'view-apikeys'; view.className = 'view hidden';
+    main.appendChild(view);
+    // nav entry next to Integrations
+    var nav = document.querySelector('.nav-item[data-view="account"]');
+    if (nav && nav.parentNode) {
+      var a = document.createElement('a');
+      a.className = 'nav-item'; a.href = '#apikeys'; a.setAttribute('data-view', 'apikeys');
+      a.innerHTML = '<span>&#128273;</span> Developer API';
+      nav.parentNode.insertBefore(a, nav.nextSibling);
+      a.addEventListener('click', function (e) { e.preventDefault(); window.switchView('apikeys'); });
+    }
+    return view;
+  }
+
+  var prev = window.switchView;
+  window.switchView = function (v) {
+    if (v === 'apikeys') {
+      ensureView();
+      document.querySelectorAll('.view').forEach(function (s) { s.classList.add('hidden'); });
+      var sec = el('view-apikeys'); if (sec) sec.classList.remove('hidden');
+      document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.toggle('active', n.getAttribute('data-view') === 'apikeys'); });
+      if ((location.hash || '').replace('#', '') !== 'apikeys') location.hash = 'apikeys';
+      load();
+      return;
+    }
+    return prev.apply(this, arguments);
+  };
+
+  function scopeBoxes(scopes) {
+    return scopes.map(function (s) {
+      return '<label><input type="checkbox" class="k-sc" value="' + E(s) + '"' + (s === 'calls:read' || s === 'agents:read' ? ' checked' : '') + '> ' +
+        '<b>' + E(s) + '</b> <span class="muted">' + E(SCOPE_HELP[s] || '') + '</span></label>';
+    }).join('');
+  }
+
+  async function load() {
+    var v = ensureView(); if (!v) return;
+    v.innerHTML = '<header class="view-head"><h2>Developer API</h2><p class="muted">Loading...</p></header>';
+    var d;
+    try { d = await api('/keys'); }
+    catch (e) { v.innerHTML = '<header class="view-head"><h2>Developer API</h2></header><div class="card"><p class="muted">Could not load your API keys. Please refresh.</p></div>'; return; }
+
+    var base = location.origin + '/api/v1';
+    v.innerHTML =
+      '<header class="view-head"><h2>Developer API</h2>' +
+      '<p class="muted">Give another system permission to read your calls or place calls on your behalf. Base URL <code>' + E(base) + '</code> &#183; ' +
+      'rate limit <b>' + E(d.rateLimit.max) + '</b> requests / ' + E(d.rateLimit.windowSec) + 's per key &#183; ' +
+      '<a href="/api/v1-openapi.json" target="_blank" rel="noopener">OpenAPI spec</a></p></header>' +
+      '<div class="card"><h3>Create a key</h3>' +
+        '<p class="muted" style="font-size:13px">Grant only the scopes the integration genuinely needs. The secret is shown once and cannot be recovered.</p>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0">' +
+          '<input id="kName" placeholder="What is this key for? e.g. Zapier" style="flex:1;min-width:200px">' +
+          '<select id="kExp"><option value="">No expiry</option><option value="30">Expires in 30 days</option><option value="90" selected>Expires in 90 days</option><option value="365">Expires in 365 days</option></select>' +
+        '</div>' +
+        '<div class="k-scopes">' + scopeBoxes(d.scopes || []) + '</div>' +
+        '<button class="k-btn pri" id="kCreate">Create key</button>' +
+        '<div id="kOut"></div>' +
+      '</div>' +
+      '<div class="card"><h3>Your keys</h3><div id="kList"></div></div>' +
+      '<div class="card"><h3>Quick test</h3><p class="muted" style="font-size:13px">Paste your new key into a terminal to confirm it works:</p>' +
+        '<div class="k-secret">curl -H "Authorization: Bearer YOUR_KEY" ' + E(base) + '/ping</div></div>';
+
+    el('kCreate').addEventListener('click', create);
+    renderList(d.keys || []);
+  }
+
+  function renderList(keys) {
+    var host = el('kList'); if (!host) return;
+    if (!keys.length) { host.innerHTML = '<p class="muted">No keys yet. Create one above.</p>'; return; }
+    host.innerHTML = keys.map(function (k) {
+      var active = k.status === 'active' && (!k.expiresAt || Date.parse(k.expiresAt) > Date.now());
+      var exp = k.expiresAt ? ('Expires ' + new Date(k.expiresAt).toLocaleDateString('en-IN')) : 'No expiry';
+      return '<div class="k-row"><div style="min-width:240px">' +
+        '<b>' + E(k.name) + '</b> <span class="k-pill ' + (active ? 'on' : 'off') + '">' + (active ? 'active' : E(k.status === 'active' ? 'expired' : k.status)) + '</span><br>' +
+        '<code>' + E(k.masked) + '</code><br>' +
+        '<span class="muted" style="font-size:12px">' + (k.scopes || []).map(function (s) { return E(s); }).join(', ') + '</span><br>' +
+        '<span class="muted" style="font-size:11.5px">' + E(exp) + ' &#183; ' + (k.lastUsedAt ? 'last used ' + new Date(k.lastUsedAt).toLocaleString('en-IN') : 'never used') + '</span>' +
+        '</div><div>' +
+        (active ? '<button class="k-btn" data-rot="' + E(k.id) + '">Rotate</button><button class="k-btn dan" data-rev="' + E(k.id) + '">Revoke</button>' : '') +
+        '</div></div>';
+    }).join('');
+    host.querySelectorAll('[data-rot]').forEach(function (b) { b.addEventListener('click', function () { rotate(b.getAttribute('data-rot')); }); });
+    host.querySelectorAll('[data-rev]').forEach(function (b) { b.addEventListener('click', function () { revoke(b.getAttribute('data-rev')); }); });
+  }
+
+  function showSecret(secret, note) {
+    var out = el('kOut'); if (!out) return;
+    out.innerHTML = '<div class="k-secret"><b style="color:#43b97f">' + E(note || 'Copy this now - it will not be shown again.') + '</b><br><br>' + E(secret) + '</div>' +
+      '<button class="k-btn" id="kCopy">Copy to clipboard</button>';
+    var c = el('kCopy');
+    if (c) c.addEventListener('click', function () {
+      try { navigator.clipboard.writeText(secret); T('Key copied'); } catch (e) { T('Select and copy manually'); }
+    });
+  }
+
+  async function create() {
+    var scopes = [].slice.call(document.querySelectorAll('.k-sc:checked')).map(function (c) { return c.value; });
+    if (!scopes.length) return T('Pick at least one scope');
+    var expVal = el('kExp').value;
+    var btn = el('kCreate'); btn.disabled = true; btn.textContent = 'Creating...';
+    try {
+      var r = await api('/keys', { method: 'POST', body: { name: el('kName').value.trim() || 'API key', scopes: scopes, expiresInDays: expVal === '' ? null : Number(expVal) } });
+      showSecret(r.secret, r.notice);
+      el('kName').value = '';
+      var d = await api('/keys'); renderList(d.keys || []);
+      T('Key created');
+    } catch (e) { T((e && e.message) || 'Could not create the key'); }
+    btn.disabled = false; btn.textContent = 'Create key';
+  }
+
+  async function rotate(id) {
+    if (!confirm('Rotate this key?\n\nA new secret is issued now. The old one keeps working for 60 minutes so you can swap it over, then stops.')) return;
+    try {
+      var r = await api('/keys/' + encodeURIComponent(id) + '/rotate', { method: 'POST', body: { overlapMinutes: 60 } });
+      showSecret(r.secret, 'New key issued. The previous key stops working in 60 minutes.');
+      var d = await api('/keys'); renderList(d.keys || []);
+      T('Key rotated');
+    } catch (e) { T((e && e.message) || 'Could not rotate the key'); }
+  }
+
+  async function revoke(id) {
+    if (!confirm('Revoke this key immediately?\n\nAnything using it will stop working at once. This cannot be undone.')) return;
+    try {
+      await api('/keys/' + encodeURIComponent(id), { method: 'DELETE' });
+      var d = await api('/keys'); renderList(d.keys || []);
+      T('Key revoked');
+    } catch (e) { T((e && e.message) || 'Could not revoke the key'); }
+  }
+
+  setTimeout(function () {
+    ensureView();
+    if ((location.hash || '').indexOf('apikeys') > -1) window.switchView('apikeys');
+  }, 1500);
+})();
