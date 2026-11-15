@@ -1,0 +1,18 @@
+# MNB Omni Caller
+
+> MNB Omni Caller is an AI voice agent platform built by MNB Research (Abrobot Technologies Private Limited, Faridabad, Haryana, India). Businesses describe what they do in a sentence and get a human-sounding voice agent that answers and makes calls, qualifies leads, books appointments, sends reminders and follows up, 24/7, in 90+ languages with mid-call language switching. Indian phone numbers are included. Pricing is pay-as-you-go from Rs 12 per minute, with no card needed to start.
+
+## Key pages
+- [Home](https://omni.mnbresearch.com/): what the agent does, use cases, industries and pricing
+- [Contact](https://omni.mnbresearch.com/contact.html)
+- [Privacy](https://omni.mnbresearch.com/privacy.html) · [Terms](https://omni.mnbresearch.com/terms.html) · [Refunds](https://omni.mnbresearch.com/refund.html)
+
+## Common uses
+- Calling new leads within seconds of a form being filled
+- Answering repeat questions from your brochure or website
+- Appointment reminders and confirmations to cut no-shows
+- Campaigns that work through old lead lists
+- Call transcripts, sentiment and outcome scoring
+
+## Company
+Built by MNB Research: https://www.mnbresearch.com (AI voice agents page: https://www.mnbresearch.com/mnb-omni-caller). Facts about the company: https://www.mnbresearch.com/company
