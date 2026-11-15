@@ -1,0 +1,8 @@
+# MNB Omni Caller - https://omni.mnbresearch.com
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /app
+Disallow: /reset.html
+
+Sitemap: https://omni.mnbresearch.com/sitemap.xml
