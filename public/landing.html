@@ -80,6 +80,7 @@ nav .logo{flex-shrink:0}
 
 /* typed headline */
 .typed-line{display:block;min-height:1.12em}
+@media (max-width:640px){.typed-line{min-height:2.2em}}
 #typed{color:transparent;background:var(--grad);-webkit-background-clip:text;background-clip:text}
 .caret{display:inline-block;width:3px;height:.92em;background:var(--accent);margin-left:4px;vertical-align:-2px;animation:blink .9s steps(1) infinite;border-radius:2px}
 @keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
@@ -209,7 +210,7 @@ footer .bot{border-top:1px solid var(--border);padding-top:20px;display:flex;jus
 
 <nav>
   <div class="wrap">
-    <a class="logo" href="#">
+    <a class="logo" href="/">
       <span class="mark">MNB</span>
       <span>MNB Research<br><span class="lsub grad-text">Omni Caller</span></span>
     </a>
@@ -239,7 +240,7 @@ footer .bot{border-top:1px solid var(--border);padding-top:20px;display:flex;jus
       <p class="lead">Describe your business in a sentence. MNB Omni Caller builds a human-sounding voice agent that calls, qualifies, books and follows up &#8212; 24/7, in 90+ languages, under your own brand.</p>
       <div class="cta">
         <a class="btn primary lg" href="/app#signup">Build my agent free</a>
-        <a class="btn ghost lg" href="#" onclick="mnbDemo();return false">&#9654; Watch a live demo</a>
+        <a class="btn ghost lg" href="/app" onclick="mnbDemo();return false">&#9654; Watch a live demo</a>
       </div>
       <p style="margin-top:16px;color:var(--muted);font-size:.85rem">No card to start &#183; &#8377;12/min pay-as-you-go &#183; Indian numbers included &#183; cancel anytime</p>
       <div class="mini">
@@ -277,9 +278,7 @@ footer .bot{border-top:1px solid var(--border);padding-top:20px;display:flex;jus
     <div class="reveal" style="display:flex;gap:12px 18px;flex-wrap:wrap;justify-content:center;align-items:center;font-weight:700;font-size:.98rem">
       <span>Featured on Shark Tank India</span><span style="opacity:.35">&#9679;</span>
       <span>DPIIT-recognised startup</span><span style="opacity:.35">&#9679;</span>
-      <span>5.0 Google rating</span><span style="opacity:.35">&#9679;</span>
-      <span>2,000+ businesses served</span><span style="opacity:.35">&#9679;</span>
-      <span>By MNB Research</span>
+      <span>MNB Research: 5.0 on Google, 2,000+ businesses served across its products</span>
     </div>
   </div>
 </section>
@@ -515,7 +514,7 @@ footer .bot{border-top:1px solid var(--border);padding-top:20px;display:flex;jus
   <div class="wrap">
     <div class="cols">
       <div>
-        <a class="logo" href="#" style="margin-bottom:14px"><span class="mark">MNB</span><span>MNB Research<br><span class="lsub grad-text">Omni Caller</span></span></a>
+        <a class="logo" href="/" style="margin-bottom:14px"><span class="mark">MNB</span><span>MNB Research<br><span class="lsub grad-text">Omni Caller</span></span></a>
         <p style="max-width:320px;margin-top:12px">Human-sounding AI voice agents for modern businesses. Built and operated by MNB Research, powered by Abrobot Technologies.</p>
       </div>
       <div>
@@ -579,7 +578,7 @@ document.querySelectorAll('.reveal').forEach(function(el){io.observe(el);});
     'answers every call at 2 a.m.',
     'qualifies leads in 30 seconds.',
     'books the appointment for you.',
-    'calls 500 leads at once.',
+    'works through 500 leads for you.',
     'speaks Hindi, English and 88 more.',
     'never takes a day off.'
   ];

@@ -486,9 +486,51 @@ async function loadOverview() {
       ? `<table><thead><tr><th>When</th><th>Agent</th><th>To</th><th>Duration</th><th>Outcome</th><th>Sentiment</th></tr></thead><tbody>${rows}</tbody></table>`
       : '<p class="muted">No calls yet. Place your first call from the "Place a Call" tab.</p>';
     attachRowClicks($('recentCalls'), logs.slice(0, 8));
+    renderAttention({ logs, failed });
   } catch (e) {
     toast('Could not load overview: ' + e.message, 5000);
   }
+}
+
+// "Needs your attention" on the Overview — only things somebody can act on.
+// Built from what the page already loaded; nothing is fetched for it, and a
+// failed load shows no strip rather than an "all clear".
+function renderAttention({ logs, failed }) {
+  const box = $('ovAttention');
+  const list = $('ovAttentionList');
+  if (!box || !list) return;
+  const items = [];
+  // statAgents is only written when the agent list loaded; a dash means it
+  // did not, and "create your first agent" would then be a false claim.
+  const agentText = $('statAgents') ? $('statAgents').textContent.trim() : '';
+  const agentsKnown = /^\d+$/.test(agentText);
+  const agentCount = agentsKnown ? Number(agentText) : -1;
+  if (!(me && me.demo) && agentsKnown) {
+    if (agentCount === 0) {
+      items.push({ view: 'studio', title: 'Create your first agent', sub: 'Give it a voice, a script and a knowledge base' });
+    }
+    if (!logs.length && agentCount > 0) {
+      items.push({ view: 'call', title: 'Place your first call', sub: 'Try your agent on your own phone' });
+    }
+  }
+  const finished = logs.filter((l) => l.call_status).length;
+  if (finished >= 10 && failed / finished >= 0.3) {
+    items.push({ view: 'logs', title: `${Math.round((failed / finished) * 100)}% of recent calls failed or went unanswered`, sub: 'Check the numbers and calling hours in Call Logs' });
+  }
+  if (me && me.minuteCap > 0 && me.role !== 'admin') {
+    const used = me.usedMinutes ?? 0;
+    const pct = Math.round((used / me.minuteCap) * 100);
+    if (pct >= 80) {
+      items.push({ view: 'plan', title: `${pct}% of this month's minutes used`, sub: `${used} of ${me.minuteCap} minutes — top up before calls stop` });
+    }
+  }
+  list.innerHTML = items
+    .map((i) => `<li><a href="#${i.view}" data-attn-view="${i.view}">${show(i.title)} &#8594;<small>${show(i.sub)}</small></a></li>`)
+    .join('');
+  list.querySelectorAll('[data-attn-view]').forEach((a) =>
+    a.addEventListener('click', (e) => { e.preventDefault(); window.switchView(a.getAttribute('data-attn-view')); }),
+  );
+  box.classList.toggle('hidden', items.length === 0);
 }
 
 function parseDur(d) {

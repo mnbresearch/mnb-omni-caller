@@ -105,24 +105,39 @@
         <h2>Overview</h2>
         <button class="btn ghost" onclick="loadOverview()">&#8635; Refresh</button>
       </header>
-      <div class="stat-grid">
-        <div class="stat-card"><div class="stat-label">Total calls</div><div class="stat-value" id="statTotal">&#8211;</div></div>
-        <div class="stat-card"><div class="stat-label">Completed</div><div class="stat-value good" id="statCompleted">&#8211;</div></div>
-        <div class="stat-card"><div class="stat-label">Failed / no answer</div><div class="stat-value bad" id="statFailed">&#8211;</div></div>
-        <div class="stat-card"><div class="stat-label">Avg duration</div><div class="stat-value" id="statAvgDur">&#8211;</div></div>
-        <div class="stat-card"><div class="stat-label">Positive sentiment</div><div class="stat-value good" id="statSentiment">&#8211;</div></div>
-        <div class="stat-card"><div class="stat-label">Agents</div><div class="stat-value" id="statAgents">&#8211;</div></div>
+      <div id="ovAttention" class="attention glass hidden" role="region" aria-label="Needs your attention">
+        <div class="attention-title">Needs your attention</div>
+        <ul id="ovAttentionList"></ul>
       </div>
+      <div class="stat-grid">
+        <div class="stat-card glass"><div class="stat-label">Total calls</div><div class="stat-value" id="statTotal">&#8211;</div></div>
+        <div class="stat-card glass"><div class="stat-label">Completed</div><div class="stat-value good" id="statCompleted">&#8211;</div></div>
+        <div class="stat-card glass"><div class="stat-label">Failed / no answer</div><div class="stat-value bad" id="statFailed">&#8211;</div></div>
+        <div class="stat-card glass"><div class="stat-label">Avg duration</div><div class="stat-value" id="statAvgDur">&#8211;</div></div>
+        <div class="stat-card glass"><div class="stat-label">Positive sentiment</div><div class="stat-value good" id="statSentiment">&#8211;</div></div>
+        <div class="stat-card glass"><div class="stat-label">Agents</div><div class="stat-value" id="statAgents">&#8211;</div></div>
+      </div>
+      <div class="quick-tools" role="navigation" aria-label="Quick tools">
+        <button type="button" class="glass" onclick="switchView('call')"><span class="ico">&#9990;</span>Place a call</button>
+        <button type="button" class="glass" onclick="switchView('studio')"><span class="ico">&#9998;</span>Agent Studio</button>
+        <button type="button" class="glass" onclick="switchView('campaigns')"><span class="ico">&#8694;</span>Campaigns</button>
+        <button type="button" class="glass" onclick="switchView('logs')"><span class="ico">&#8801;</span>Call logs</button>
+        <button type="button" class="glass" onclick="switchView('knowledge')"><span class="ico">&#9636;</span>Knowledge</button>
+        <button type="button" class="glass" onclick="switchView('numbers')"><span class="ico">&#9742;</span>Numbers</button>
+      </div>
+      <div class="card">
+        <h3>Recent calls</h3>
+        <div id="recentCalls" class="table-wrap"></div>
+      </div>
+      <details class="overview-more" open>
+        <summary>Charts</summary>
       <div class="chart-grid">
         <div class="card"><h3>Calls per day</h3><canvas id="chartVolume"></canvas></div>
         <div class="card"><h3>Call outcomes</h3><canvas id="chartStatus"></canvas></div>
         <div class="card"><h3>Sentiment</h3><canvas id="chartSentiment"></canvas></div>
         <div class="card"><h3>Channel</h3><canvas id="chartChannel"></canvas></div>
       </div>
-      <div class="card">
-        <h3>Recent calls</h3>
-        <div id="recentCalls" class="table-wrap"></div>
-      </div>
+      </details>
     </section>
 
     <!-- Place a Call -->
@@ -479,5 +494,6 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="app.js"></script>
+<script src="nav-groups.js"></script>
 </body>
 </html>
