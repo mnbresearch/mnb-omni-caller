@@ -14,7 +14,7 @@
 (function () {
   'use strict';
   var GROUPS = [
-    { key: 'home', label: 'Home', views: ['getstarted', 'overview', 'live', 'call'] },
+    { key: 'home', label: 'Home', views: ['getstarted', 'overview', 'tools', 'live', 'call'] },
     { key: 'build', label: 'Build agents', views: ['studio', 'templates', 'knowledge', 'testing', 'versions', 'voicewidget'] },
     { key: 'calls', label: 'Calls & leads', views: ['logs', 'campaigns', 'contacts', 'followups', 'reminders', 'lookup', 'blocklist'] },
     { key: 'insights', label: 'Insights', views: ['analytics', 'trends', 'coaching', 'leaderboard', 'export'] },
@@ -88,6 +88,12 @@
       h.classList.toggle('static', key === 'home');
     });
     Array.prototype.slice.call(nav.querySelectorAll(':scope > .nav-item')).forEach(function (a) {
+      if (a.classList.contains('pz-nav-hidden')) {
+        a.style.display = 'none';
+        return;
+      } else {
+        a.style.display = '';
+      }
       var key = a.getAttribute('data-group');
       var isClosed = key !== 'home' && !!closed[key] && key !== activeGroup;
       a.classList.toggle('nav-folded', isClosed);
@@ -100,6 +106,8 @@
     try { localStorage.setItem(STORE, JSON.stringify(closed)); } catch (e) { /* ignore */ }
     paint();
   }
+
+  window.__mnbArrangeNav = arrange;
 
   function start() {
     var nav = document.querySelector('.sidebar nav');

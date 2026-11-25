@@ -9,6 +9,7 @@ const express = require('express');
 const path = require('path');
 const db = require('./db');
 const demo = require('./demo');
+const pz = require('./personalization');
 
 const app = express();
 const crypto = require('crypto');
@@ -2554,6 +2555,77 @@ app.post('/api/calls/:id/whatsapp-summary', async (req, res) => {
     if (!r.ok) return res.status(502).json({ error: r.error || 'WhatsApp send failed', summary: text });
     res.json({ ok: true, summary: text, to: to });
   } catch (e) { res.status(500).json({ error: 'Could not send the WhatsApp summary.' }); }
+});
+
+/* ================= Personalisation Engine & Module Registry ================= */
+// Implements the 4-Level Configuration Hierarchy & Central Feature Catalogue
+app.get('/api/personalization', (req, res) => {
+  const d = db.getUserData(req.user.id);
+  const orgSettings = db.getSettings() || {};
+  let p = d.personalization;
+  if (!p || typeof p !== 'object' || !p.version) {
+    p = pz.getDefaultPersonalization(req.user.role === 'admin' ? 'executive' : 'sales_leader', req.user);
+    db.setUserBucket(req.user.id, 'personalization', p);
+  }
+  const moduleStates = pz.calculateModuleStates(req.user, orgSettings, p);
+  res.json({
+    ok: true,
+    personalization: p,
+    personas: pz.PERSONAS,
+    widgetsCatalog: pz.WIDGETS_CATALOG,
+    modules: moduleStates,
+    orgModules: orgSettings.modules || {}
+  });
+});
+
+app.put('/api/personalization', async (req, res) => {
+  const d = db.getUserData(req.user.id);
+  const existing = d.personalization;
+  const sanitized = pz.sanitizePersonalization(req.body || {}, existing, req.user);
+  db.setUserBucket(req.user.id, 'personalization', sanitized);
+  await db.flush().catch(() => {});
+  db.trackEvent('personalization.updated', {
+    userId: req.user.id,
+    props: { role: sanitized.role, layoutPreset: sanitized.layoutPreset, widgetCount: sanitized.widgets.length }
+  });
+  const orgSettings = db.getSettings() || {};
+  const moduleStates = pz.calculateModuleStates(req.user, orgSettings, sanitized);
+  res.json({ ok: true, personalization: sanitized, modules: moduleStates });
+});
+
+app.post('/api/personalization/reset', async (req, res) => {
+  const targetRole = String((req.query && req.query.role) || (req.body && req.body.role) || (req.user.role === 'admin' ? 'executive' : 'sales_leader'));
+  const fresh = pz.getDefaultPersonalization(targetRole, req.user);
+  db.setUserBucket(req.user.id, 'personalization', fresh);
+  await db.flush().catch(() => {});
+  db.trackEvent('personalization.reset', { userId: req.user.id, props: { role: fresh.role } });
+  const orgSettings = db.getSettings() || {};
+  const moduleStates = pz.calculateModuleStates(req.user, orgSettings, fresh);
+  res.json({ ok: true, personalization: fresh, modules: moduleStates });
+});
+
+app.get('/api/modules', (req, res) => {
+  const d = db.getUserData(req.user.id);
+  const p = d.personalization || pz.getDefaultPersonalization(req.user.role === 'admin' ? 'executive' : 'sales_leader', req.user);
+  const orgSettings = db.getSettings() || {};
+  const modules = pz.calculateModuleStates(req.user, orgSettings, p);
+  res.json({ ok: true, modules, orgModules: orgSettings.modules || {} });
+});
+
+app.put('/api/admin/org/modules', adminOnly, async (req, res) => {
+  const { modules } = req.body || {};
+  if (!modules || typeof modules !== 'object') {
+    return res.status(400).json({ error: 'modules object required' });
+  }
+  const clean = {};
+  const validIds = new Set(pz.MODULES_REGISTRY.map((m) => m.id));
+  for (const [k, v] of Object.entries(modules)) {
+    if (validIds.has(k)) clean[k] = Boolean(v);
+  }
+  db.patchSettings('modules', clean);
+  await db.flush().catch(() => {});
+  db.audit(req.user.id, 'admin.modules.update', null, { modules: clean });
+  res.json({ ok: true, orgModules: db.getSettings().modules || {} });
 });
 
 /* ================= Static frontend ================= */
